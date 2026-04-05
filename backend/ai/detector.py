@@ -2,9 +2,12 @@ import cv2
 import numpy as np
 from ai.encoder import face_app
 
+<<<<<<< HEAD
 # Initialisation du modèle InsightFace (une seule fois)
 
 
+=======
+>>>>>>> ferdaous
 
 def detect_faces(image: np.ndarray) -> list:
     """
