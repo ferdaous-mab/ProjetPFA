@@ -1,0 +1,32 @@
+### Test 1 : Créer un étudiant
+POST http://localhost:8000/api/enroll
+Content-Type: application/json
+
+{
+  "nom": "Bennani",
+  "prenom": "Youssef",
+  "email": "youssef@test.com",
+  "classe": "INFO3"
+}
+
+### Test 2 : Email déjà existant
+POST http://localhost:8000/api/enroll
+Content-Type: application/json
+
+{
+  "nom": "Bennani",
+  "prenom": "Youssef",
+  "email": "youssef@test.com",
+  "classe": "INFO3"
+}
+
+### Test 3 : Email invalide
+POST http://localhost:8000/api/enroll
+Content-Type: application/json
+
+{
+  "nom": "Alami",
+  "prenom": "Sara",
+  "email": "email_invalide",
+  "classe": "INFO2"
+}
