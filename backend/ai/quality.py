@@ -1,18 +1,17 @@
 import cv2
 import numpy as np
 
-# Seuils de qualité
-MIN_SHARPNESS  = 100.0   # score flou minimum
-MIN_BRIGHTNESS = 60.0    # luminosité minimum
-MAX_BRIGHTNESS = 200.0   # luminosité maximum
-MIN_FACE_SIZE  = 80      # taille minimum du visage en pixels
+MIN_SHARPNESS  = 50.0    # était 100.0 — baissé pour webcam
+MIN_BRIGHTNESS = 40.0    # était 60.0 — plus tolérant
+MAX_BRIGHTNESS = 220.0   # était 200.0 — plus tolérant
+MIN_FACE_SIZE  = 60      # était 80 — plus tolérant
 
 def check_sharpness(image: np.ndarray) -> float:
     """
     Calcule le score de netteté de l'image.
     Plus le score est élevé, plus l'image est nette.
     """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray  = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     score = cv2.Laplacian(gray, cv2.CV_64F).var()
     return round(float(score), 2)
 
@@ -37,9 +36,8 @@ def check_face_size(bbox) -> bool:
 def verify_quality(image: np.ndarray, faces: list) -> dict:
     """
     Vérifie la qualité complète d'une image avant encoding.
-    Retourne un dict avec le résultat et la raison du rejet si applicable.
+    Retourne un dict avec le résultat et la raison du rejet.
     """
-    # Vérification : aucun visage détecté
     if len(faces) == 0:
         return {
             "ok": False,
@@ -48,7 +46,6 @@ def verify_quality(image: np.ndarray, faces: list) -> dict:
             "brightness": None
         }
 
-    # Vérification : plusieurs visages
     if len(faces) > 1:
         return {
             "ok": False,
@@ -61,7 +58,6 @@ def verify_quality(image: np.ndarray, faces: list) -> dict:
     brightness = check_brightness(image)
     face       = faces[0]
 
-    # Vérification flou
     if sharpness < MIN_SHARPNESS:
         return {
             "ok": False,
@@ -70,7 +66,6 @@ def verify_quality(image: np.ndarray, faces: list) -> dict:
             "brightness": brightness
         }
 
-    # Vérification luminosité trop sombre
     if brightness < MIN_BRIGHTNESS:
         return {
             "ok": False,
@@ -79,7 +74,6 @@ def verify_quality(image: np.ndarray, faces: list) -> dict:
             "brightness": brightness
         }
 
-    # Vérification luminosité trop claire
     if brightness > MAX_BRIGHTNESS:
         return {
             "ok": False,
@@ -88,7 +82,6 @@ def verify_quality(image: np.ndarray, faces: list) -> dict:
             "brightness": brightness
         }
 
-    # Vérification taille du visage
     if not check_face_size(face.bbox):
         return {
             "ok": False,
@@ -97,7 +90,6 @@ def verify_quality(image: np.ndarray, faces: list) -> dict:
             "brightness": brightness
         }
 
-    # Tout est bon
     return {
         "ok": True,
         "reason": None,

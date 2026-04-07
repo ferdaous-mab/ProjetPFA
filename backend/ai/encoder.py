@@ -1,13 +1,5 @@
 import numpy as np
-from insightface.app import FaceAnalysis
-
-# Initialisation du modèle InsightFace (une seule fois)
-face_app = FaceAnalysis(
-    name="buffalo_l",
-    allowed_modules=["detection", "recognition"]  # détection + encodage
-)
-face_app.prepare(ctx_id=-1)  # -1 = CPU
-
+from ai.detector import face_app
 
 def encode_face(image: np.ndarray) -> dict:
     """
@@ -40,26 +32,22 @@ def encode_face(image: np.ndarray) -> dict:
             "faces": faces
         }
 
-    face = faces[0]
-
-    # Normalisation L2 — obligatoire pour similarité cosinus correcte
+    face      = faces[0]
     embedding = face.embedding
     embedding = embedding / np.linalg.norm(embedding)
 
     return {
         "ok": True,
         "reason": None,
-        "embedding": embedding,          # numpy array 512-d
+        "embedding": embedding,
         "det_score": float(face.det_score),
         "bbox": face.bbox.tolist(),
         "faces": faces
     }
 
-
 def compute_similarity(embedding1: np.ndarray, embedding2: np.ndarray) -> float:
     """
     Calcule la similarité cosinus entre deux embeddings.
     Retourne un score entre 0 et 1.
-    Plus le score est proche de 1, plus les visages sont similaires.
     """
     return float(np.dot(embedding1, embedding2))

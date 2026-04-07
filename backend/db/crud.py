@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
-from db.models import Student, StudentFace
+from db.models import Student, StudentFace, StudentImage
+import numpy as np
 
 # ─── STUDENTS ────────────────────────────────────────────────────────────────
 
@@ -29,29 +30,72 @@ def update_enrolled(db: Session, student_id):
         db.refresh(student)
     return student
 
+# ─── STUDENT IMAGES ──────────────────────────────────────────────────────────
+
+def create_student_image(
+    db: Session,
+    student_id,
+    image_url: str,
+    angle: str,
+    quality_score: float,
+    brightness: float,
+    is_valid: bool = True
+):
+    """Sauvegarde une image capturée pendant l'enrôlement"""
+    image = StudentImage(
+        student_id=student_id,
+        image_url=image_url,
+        angle=angle,
+        quality_score=quality_score,
+        brightness=brightness,
+        is_valid=is_valid
+    )
+    db.add(image)
+    db.commit()
+    db.refresh(image)
+    return image
+
+def get_student_images(db: Session, student_id):
+    """Récupère toutes les images valides d'un étudiant"""
+    return db.query(StudentImage).filter(
+        StudentImage.student_id == student_id,
+        StudentImage.is_valid == True
+    ).all()
+
+def count_student_images(db: Session, student_id) -> int:
+    """Compte les images valides d'un étudiant"""
+    return db.query(StudentImage).filter(
+        StudentImage.student_id == student_id,
+        StudentImage.is_valid == True
+    ).count()
+
 # ─── STUDENT FACES ───────────────────────────────────────────────────────────
 
 def create_student_face(
     db: Session,
     student_id,
     embedding,
-    angle: str,
-    quality_score: float,
-    det_score: float
+    det_score: float,
+    nb_images: int = 20
 ):
+    """Sauvegarde l'embedding final calculé depuis les 20 images"""
     face = StudentFace(
         student_id=student_id,
         embedding=embedding.tolist(),
-        angle=angle,
-        quality_score=quality_score,
-        det_score=det_score
+        det_score=det_score,
+        nb_images=nb_images
     )
     db.add(face)
     db.commit()
     db.refresh(face)
     return face
 
-def count_student_faces(db: Session, student_id) -> int:
+def get_student_face(db: Session, student_id):
+    """Récupère l'embedding d'un étudiant"""
     return db.query(StudentFace).filter(
         StudentFace.student_id == student_id
-    ).count()
+    ).first()
+
+def get_all_faces(db: Session):
+    """Récupère tous les embeddings pour la reconnaissance"""
+    return db.query(StudentFace).all()
