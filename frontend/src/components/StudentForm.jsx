@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import axios from 'axios'
 
-const CLASSES = ['INFO1','INFO2','INFO3','GC1','GC2','GC3','MATH1','MATH2','ECO1','ECO2']
+const CLASSES = ['A', 'B', 'C', 'D']
+const ANNEES  = ['1ère année', '2ème année', '3ème année', '4ème année', '5ème année']
+const API_URL = 'http://10.10.0.53:8000'
 
 export default function StudentForm({ onSuccess }) {
-  const [form,    setForm]    = useState({ nom:'', prenom:'', email:'', classe:'' })
+  const [form,    setForm]    = useState({ nom:'', prenom:'', email:'', classe:'', annee_scolaire:'' })
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
 
@@ -15,7 +17,7 @@ export default function StudentForm({ onSuccess }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await axios.post('http://localhost:8000/api/enroll', form)
+      const res = await axios.post(`${API_URL}/api/enroll`, form)
       onSuccess(res.data.student_id)
     } catch (err) {
       setError(err.response?.data?.detail || "Erreur lors de l'inscription")
@@ -41,48 +43,40 @@ export default function StudentForm({ onSuccess }) {
         .sf-input:focus { border-color:rgba(139,92,246,0.6); }
         .sf-input::placeholder { color:rgba(255,255,255,0.2); }
         .sf-input option { background:#1a1a2e; color:#fff; }
-        .sf-btn {
-          width:100%; padding:15px; border:none; border-radius:12px;
-          font-size:15px; font-weight:600; font-family:'Sora',sans-serif;
-          cursor:pointer; letter-spacing:0.02em; transition:transform .15s, opacity .15s;
-          background:linear-gradient(135deg,#7c3aed,#4f46e5);
-          color:#fff; margin-top:8px;
-        }
-        .sf-btn:hover:not(:disabled) { transform:translateY(-1px); opacity:.9; }
-        .sf-btn:disabled { opacity:.5; cursor:not-allowed; }
         .sf-label {
           display:block; font-size:11px; font-weight:600; letter-spacing:.1em;
           color:rgba(255,255,255,0.35); margin-bottom:8px; text-transform:uppercase;
         }
+        .sf-btn {
+          width:100%; padding:15px; border:none; border-radius:12px;
+          font-size:15px; font-weight:600; font-family:'Sora',sans-serif;
+          cursor:pointer; transition:transform .15s, opacity .15s;
+          background:linear-gradient(135deg,#7c3aed,#4f46e5); color:#fff; margin-top:8px;
+        }
+        .sf-btn:hover:not(:disabled) { transform:translateY(-1px); opacity:.9; }
+        .sf-btn:disabled { opacity:.5; cursor:not-allowed; }
       `}</style>
 
       <div style={{
-        width:'100%', maxWidth:'440px',
+        width:'100%', maxWidth:'460px',
         background:'rgba(255,255,255,0.03)',
         border:'1px solid rgba(255,255,255,0.07)',
         borderRadius:'24px', padding:'44px 40px',
-        backdropFilter:'blur(24px)',
       }}>
-        {/* Logo / badge */}
-        <div style={{
-          display:'flex', alignItems:'center', justifyContent:'center',
-          gap:'10px', marginBottom:'32px',
-        }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:'10px', marginBottom:'32px' }}>
           <div style={{
             width:'40px', height:'40px', borderRadius:'10px',
             background:'linear-gradient(135deg,#7c3aed,#4f46e5)',
-            display:'flex', alignItems:'center', justifyContent:'center',
-            fontSize:'18px',
+            display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px',
           }}>🎓</div>
-          <span style={{ fontSize:'15px', fontWeight:'600', color:'rgba(255,255,255,0.9)', letterSpacing:'.02em' }}>
+          <span style={{ fontSize:'15px', fontWeight:'600', color:'rgba(255,255,255,0.9)' }}>
             SmartCampus IA
           </span>
         </div>
 
         <h1 style={{
           fontSize:'24px', fontWeight:'700', color:'#fff',
-          textAlign:'center', margin:'0 0 6px',
-          letterSpacing:'-0.02em',
+          textAlign:'center', margin:'0 0 6px', letterSpacing:'-0.02em',
         }}>Inscription étudiant</h1>
         <p style={{
           fontSize:'13px', color:'rgba(255,255,255,0.35)',
@@ -119,13 +113,23 @@ export default function StudentForm({ onSuccess }) {
               onChange={handleChange} required placeholder="youssef@esisa.ac.ma" />
           </div>
 
-          <div style={{ marginBottom:'24px' }}>
-            <label className="sf-label">Classe</label>
-            <select className="sf-input" name="classe" value={form.classe}
-              onChange={handleChange} required>
-              <option value="">Sélectionnez votre classe</option>
-              {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'24px' }}>
+            <div>
+              <label className="sf-label">Année scolaire</label>
+              <select className="sf-input" name="annee_scolaire" value={form.annee_scolaire}
+                onChange={handleChange} required>
+                <option value="">Sélectionnez</option>
+                {ANNEES.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="sf-label">Classe</label>
+              <select className="sf-input" name="classe" value={form.classe}
+                onChange={handleChange} required>
+                <option value="">Sélectionnez</option>
+                {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
           </div>
 
           <button type="submit" className="sf-btn" disabled={loading}>

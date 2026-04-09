@@ -9,41 +9,17 @@ from db import crud
 from ai.encoder import encode_face
 from ai.quality import verify_quality
 from ai.detector import detect_faces
-from ai.storage import upload_image
 
 router = APIRouter()
 
-REQUIRED_IMAGES = 20
-
-ANGLES_INSTRUCTIONS = [
-    {"angle": "front_1",      "instruction": "Regardez droit devant la caméra"},
-    {"angle": "front_2",      "instruction": "Regardez droit devant — expression neutre"},
-    {"angle": "left_1",       "instruction": "Tournez légèrement la tête à gauche"},
-    {"angle": "left_2",       "instruction": "Tournez encore plus à gauche"},
-    {"angle": "right_1",      "instruction": "Tournez légèrement la tête à droite"},
-    {"angle": "right_2",      "instruction": "Tournez encore plus à droite"},
-    {"angle": "up_1",         "instruction": "Inclinez la tête vers le haut"},
-    {"angle": "up_2",         "instruction": "Regardez encore plus vers le haut"},
-    {"angle": "down_1",       "instruction": "Inclinez la tête vers le bas"},
-    {"angle": "down_2",       "instruction": "Regardez encore plus vers le bas"},
-    {"angle": "left_far",     "instruction": "Tournez bien à gauche"},
-    {"angle": "right_far",    "instruction": "Tournez bien à droite"},
-    {"angle": "smile_1",      "instruction": "Souriez naturellement"},
-    {"angle": "smile_2",      "instruction": "Souriez encore"},
-    {"angle": "neutral_1",    "instruction": "Expression neutre"},
-    {"angle": "neutral_2",    "instruction": "Expression neutre — regardez la caméra"},
-    {"angle": "tilt_left",    "instruction": "Inclinez légèrement la tête à gauche"},
-    {"angle": "tilt_right",   "instruction": "Inclinez légèrement la tête à droite"},
-    {"angle": "close_1",      "instruction": "Rapprochez-vous légèrement de la caméra"},
-    {"angle": "far_1",        "instruction": "Éloignez-vous légèrement de la caméra"},
-]
-
 # ─── ROUTE 1 : Formulaire étudiant ───────────────────────────────────────────
+
 class StudentForm(BaseModel):
     nom: str
     prenom: str
     email: EmailStr
     classe: str
+    annee_scolaire: str
 
 @router.post("/enroll")
 def enroll_student(form: StudentForm, db: Session = Depends(get_db)):
@@ -56,157 +32,116 @@ def enroll_student(form: StudentForm, db: Session = Depends(get_db)):
         nom=form.nom,
         prenom=form.prenom,
         email=form.email,
-        classe=form.classe
+        classe=form.classe,
+        annee_scolaire=form.annee_scolaire
     )
 
     return {
         "message": "Étudiant enregistré avec succès",
-        "student_id": str(student.id),
-        "angles": ANGLES_INSTRUCTIONS
+        "student_id": str(student.id)
     }
 
-# ─── ROUTE 2 : Upload image ───────────────────────────────────────────────────
-@router.post("/enroll/image")
-async def enroll_image(
-    student_id: str    = Form(...),
-    angle: str         = Form(...),
-    image: UploadFile  = File(...),
-    db: Session        = Depends(get_db)
+# ─── ROUTE 2 : Capture frame ─────────────────────────────────────────────────
+
+@router.post("/enroll/capture")
+async def enroll_capture(
+    student_id: str   = Form(...),
+    image: UploadFile = File(...),
+    db: Session       = Depends(get_db)
 ):
-    # Vérifier que l'étudiant existe
     student = crud.get_student_by_id(db, student_id)
     if not student:
         raise HTTPException(status_code=404, detail="Étudiant non trouvé")
 
-    # Vérifier nombre d'images déjà capturées
-    total = crud.count_student_images(db, student_id)
-    if total >= REQUIRED_IMAGES:
-        raise HTTPException(status_code=400, detail="20 images déjà capturées")
-
-    # Lire l'image
     contents = await image.read()
     nparr    = np.frombuffer(contents, np.uint8)
     img      = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
     if img is None:
-        raise HTTPException(status_code=400, detail="Image invalide")
+        return {"ok": False, "reason": "Image invalide", "total": 0}
 
-    # Détection visage
-    faces = detect_faces(img)
-
-    # Vérification qualité
+    faces   = detect_faces(img)
     quality = verify_quality(img, faces)
 
     if not quality["ok"]:
         return {
             "ok": False,
             "reason": quality["reason"],
-            "total_captures": total
+            "total": crud.count_temp_embeddings(db, student_id)
         }
 
-    # Upload vers Supabase Storage
-    image_url = upload_image(contents, student_id, angle)
+    result = encode_face(img)
+    if not result["ok"]:
+        return {
+            "ok": False,
+            "reason": result["reason"],
+            "total": crud.count_temp_embeddings(db, student_id)
+        }
 
-    # Sauvegarder dans BD
-    crud.create_student_image(
+    crud.create_temp_embedding(
         db=db,
         student_id=student_id,
-        image_url=image_url,
-        angle=angle,
-        quality_score=quality["sharpness"],
-        brightness=quality["brightness"],
-        is_valid=True
+        embedding=result["embedding"],
+        det_score=result["det_score"],
+        quality_score=quality["sharpness"] or 0.0
     )
 
-    total_now = total + 1
-
-    # Si 20 images capturées → déclencher calcul embedding
-    if total_now >= REQUIRED_IMAGES:
-        return {
-            "ok": True,
-            "message": "20 images capturées — prêt pour le calcul embedding",
-            "angle": angle,
-            "total_captures": total_now,
-            "ready_for_compute": True
-        }
+    total = crud.count_temp_embeddings(db, student_id)
 
     return {
         "ok": True,
-        "message": f"Image '{angle}' capturée avec succès",
-        "angle": angle,
-        "total_captures": total_now,
-        "ready_for_compute": False,
-        "next_instruction": ANGLES_INSTRUCTIONS[total_now]["instruction"]
+        "total": total,
+        "det_score": round(result["det_score"], 3),
+        "quality": round(quality["sharpness"] or 0, 1)
     }
 
-# ─── ROUTE 3 : Calcul embedding final ────────────────────────────────────────
-@router.post("/enroll/compute")
-async def compute_embedding(
+# ─── ROUTE 3 : Finalisation ───────────────────────────────────────────────────
+
+@router.post("/enroll/finalize")
+async def enroll_finalize(
     student_id: str = Form(...),
     db: Session     = Depends(get_db)
 ):
-    from ai.storage import supabase
-    from config import SUPABASE_BUCKET
-    import requests
-
-    # Vérifier étudiant
     student = crud.get_student_by_id(db, student_id)
     if not student:
         raise HTTPException(status_code=404, detail="Étudiant non trouvé")
 
-    # Récupérer les 20 images depuis BD
-    images = crud.get_student_images(db, student_id)
-    if len(images) < REQUIRED_IMAGES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Seulement {len(images)} images — 20 requises"
-        )
+    temp_faces = crud.get_temp_embeddings(db, student_id)
 
-    embeddings = []
-    det_scores = []
+    if len(temp_faces) < 5:
+        return {
+            "ok": False,
+            "retry": True,
+            "detail": f"Seulement {len(temp_faces)} embeddings valides — veuillez réessayer la capture"
+        }
 
-    for img_record in images:
-        # Télécharger l'image depuis Supabase Storage
-        response = requests.get(img_record.image_url)
-        nparr    = np.frombuffer(response.content, np.uint8)
-        img      = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    sorted_faces = sorted(
+        temp_faces,
+        key=lambda x: (x.quality_score or 0) * (x.det_score or 0),
+        reverse=True
+    )
+    best_faces = sorted_faces[:15]
 
-        if img is None:
-            continue
+    embeddings = [np.array(f.embedding) for f in best_faces]
+    mean_emb   = np.mean(embeddings, axis=0)
+    mean_emb   = mean_emb / np.linalg.norm(mean_emb)
+    mean_score = float(np.mean([f.det_score or 0 for f in best_faces]))
 
-        # Calculer embedding
-        result = encode_face(img)
-        if result["ok"]:
-            embeddings.append(result["embedding"])
-            det_scores.append(result["det_score"])
+    crud.delete_temp_embeddings(db, student_id)
 
-    if len(embeddings) < 10:
-        raise HTTPException(
-            status_code=400,
-            detail="Pas assez d'images valides pour calculer l'embedding"
-        )
-
-    # Moyenne des embeddings
-    mean_embedding = np.mean(embeddings, axis=0)
-    mean_embedding = mean_embedding / np.linalg.norm(mean_embedding)
-    mean_det_score = float(np.mean(det_scores))
-
-    # Sauvegarder embedding final
     crud.create_student_face(
         db=db,
         student_id=student_id,
-        embedding=mean_embedding,
-        det_score=mean_det_score,
-        nb_images=len(embeddings)
+        embedding=mean_emb,
+        det_score=mean_score,
+        nb_images=len(best_faces)
     )
 
-    # Marquer étudiant comme enrôlé
     crud.update_enrolled(db, student_id)
 
     return {
-        "message": "Embedding calculé avec succès",
-        "student_id": student_id,
-        "nb_images_used": len(embeddings),
-        "det_score_moyen": mean_det_score,
-        "enrolled": True
+        "ok": True,
+        "message": "Enrôlement finalisé avec succès",
+        "nb_embeddings_used": len(best_faces),
+        "det_score_moyen": round(mean_score, 3)
     }
