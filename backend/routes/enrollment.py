@@ -1,147 +1,157 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
-import cv2
-import numpy as np
-
-from config import get_db
-from db import crud
-from ai.encoder import encode_face
+from fastapi import Depends
+from db.models import StudentFaceTemp
+from db.crud import (
+    create_student,
+    get_student_by_email,
+    create_temp_embedding,
+    get_temp_embeddings,
+    create_student_face,
+    delete_temp_embeddings,
+    update_enrolled,
+)
 from ai.quality import verify_quality
-from ai.detector import detect_faces
+from ai.encoder import encode_face_augmented
+from ai.detector import face_app
+from config import SessionLocal
+import numpy as np
+import cv2
 
 router = APIRouter()
 
-# ─── ROUTE 1 : Formulaire étudiant ───────────────────────────────────────────
+TARGET_FRAMES = 7
 
-class StudentForm(BaseModel):
-    nom: str
-    prenom: str
-    email: EmailStr
-    classe: str
-    annee_scolaire: str
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 
 @router.post("/enroll")
-def enroll_student(form: StudentForm, db: Session = Depends(get_db)):
-    existing = crud.get_student_by_email(db, form.email)
+async def enroll_student(
+    nom: str = Form(...),
+    prenom: str = Form(...),
+    email: str = Form(...),
+    classe: str = Form(...),
+    annee_scolaire: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    existing = get_student_by_email(db, email)
     if existing:
-        raise HTTPException(status_code=400, detail="Email déjà enregistré")
+        raise HTTPException(status_code=400, detail="Email déjà utilisé")
 
-    student = crud.create_student(
-        db=db,
-        nom=form.nom,
-        prenom=form.prenom,
-        email=form.email,
-        classe=form.classe,
-        annee_scolaire=form.annee_scolaire
-    )
-
+    student = create_student(db, nom=nom, prenom=prenom, email=email,
+                             classe=classe, annee_scolaire=annee_scolaire)
     return {
-        "message": "Étudiant enregistré avec succès",
-        "student_id": str(student.id)
+        "student_id": str(student.id),
+        "message": "Étudiant créé, prêt pour l'enrôlement",
+        "target_frames": TARGET_FRAMES
     }
 
-# ─── ROUTE 2 : Capture frame ─────────────────────────────────────────────────
 
 @router.post("/enroll/capture")
-async def enroll_capture(
-    student_id: str   = Form(...),
+async def capture_frame(
+    student_id: str = Form(...),
     image: UploadFile = File(...),
-    db: Session       = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
-    student = crud.get_student_by_id(db, student_id)
-    if not student:
-        raise HTTPException(status_code=404, detail="Étudiant non trouvé")
-
     contents = await image.read()
-    nparr    = np.frombuffer(contents, np.uint8)
-    img      = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
     if img is None:
-        return {"ok": False, "reason": "Image invalide", "total": 0}
+        raise HTTPException(status_code=400, detail="Image invalide")
 
-    faces   = detect_faces(img)
+    img = cv2.resize(img, (320, 240))
+
+    # Détection des visages d'abord
+    faces = face_app.get(img)
+
+    # Vérification qualité (image + faces)
     quality = verify_quality(img, faces)
-
     if not quality["ok"]:
         return {
-            "ok": False,
+            "accepted": False,
             "reason": quality["reason"],
-            "total": crud.count_temp_embeddings(db, student_id)
+            "frames_captured": _count_temp(db, student_id)
         }
 
-    result = encode_face(img)
-    if not result["ok"]:
+    # Encodage augmenté
+    embedding, det_score = encode_face_augmented(img)
+    if embedding is None:
         return {
-            "ok": False,
-            "reason": result["reason"],
-            "total": crud.count_temp_embeddings(db, student_id)
+            "accepted": False,
+            "reason": "Encodage échoué",
+            "frames_captured": _count_temp(db, student_id)
         }
 
-    crud.create_temp_embedding(
-        db=db,
+    create_temp_embedding(db,
         student_id=student_id,
-        embedding=result["embedding"],
-        det_score=result["det_score"],
-        quality_score=quality["sharpness"] or 0.0
+        embedding=embedding,
+        det_score=det_score,
+        quality_score=det_score
     )
 
-    total = crud.count_temp_embeddings(db, student_id)
-
+    frames_captured = _count_temp(db, student_id)
     return {
-        "ok": True,
-        "total": total,
-        "det_score": round(result["det_score"], 3),
-        "quality": round(quality["sharpness"] or 0, 1)
+        "accepted": True,
+        "frames_captured": frames_captured,
+        "target_frames": TARGET_FRAMES,
+        "progress": round(frames_captured / TARGET_FRAMES * 100),
+        "ready_to_finalize": frames_captured >= TARGET_FRAMES
     }
 
-# ─── ROUTE 3 : Finalisation ───────────────────────────────────────────────────
 
 @router.post("/enroll/finalize")
-async def enroll_finalize(
+async def finalize_enrollment(
     student_id: str = Form(...),
-    db: Session     = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
-    student = crud.get_student_by_id(db, student_id)
-    if not student:
-        raise HTTPException(status_code=404, detail="Étudiant non trouvé")
+    temp_records = get_temp_embeddings(db, student_id)
 
-    temp_faces = crud.get_temp_embeddings(db, student_id)
+    if len(temp_records) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pas assez de frames valides ({len(temp_records)}/3 minimum)"
+        )
 
-    if len(temp_faces) < 5:
-        return {
-            "ok": False,
-            "retry": True,
-            "detail": f"Seulement {len(temp_faces)} embeddings valides — veuillez réessayer la capture"
-        }
+    temp_records.sort(key=lambda r: r.quality_score * r.det_score, reverse=True)
+    top_records = temp_records[:TARGET_FRAMES]
 
-    sorted_faces = sorted(
-        temp_faces,
-        key=lambda x: (x.quality_score or 0) * (x.det_score or 0),
-        reverse=True
-    )
-    best_faces = sorted_faces[:15]
+    embeddings = [np.array(r.embedding, dtype=np.float32) for r in top_records]
+    weights = np.array([r.quality_score * r.det_score for r in top_records])
+    weights = weights / weights.sum()
 
-    embeddings = [np.array(f.embedding) for f in best_faces]
-    mean_emb   = np.mean(embeddings, axis=0)
-    mean_emb   = mean_emb / np.linalg.norm(mean_emb)
-    mean_score = float(np.mean([f.det_score or 0 for f in best_faces]))
+    final_embedding = np.average(embeddings, axis=0, weights=weights)
+    norm = np.linalg.norm(final_embedding)
+    if norm > 0:
+        final_embedding = final_embedding / norm
 
-    crud.delete_temp_embeddings(db, student_id)
+    avg_det_score = float(np.mean([r.det_score for r in top_records]))
 
-    crud.create_student_face(
-        db=db,
+    create_student_face(db,
         student_id=student_id,
-        embedding=mean_emb,
-        det_score=mean_score,
-        nb_images=len(best_faces)
+        embedding=final_embedding,
+        det_score=avg_det_score,
+        nb_images=len(top_records)
     )
 
-    crud.update_enrolled(db, student_id)
+    update_enrolled(db, student_id)
+    delete_temp_embeddings(db, student_id)
 
     return {
-        "ok": True,
-        "message": "Enrôlement finalisé avec succès",
-        "nb_embeddings_used": len(best_faces),
-        "det_score_moyen": round(mean_score, 3)
+        "success": True,
+        "message": "Enrôlement terminé avec succès",
+        "frames_used": len(top_records),
+        "avg_det_score": round(avg_det_score, 4)
     }
+
+
+def _count_temp(db: Session, student_id: str) -> int:
+    return db.query(StudentFaceTemp).filter(
+        StudentFaceTemp.student_id == student_id
+    ).count()

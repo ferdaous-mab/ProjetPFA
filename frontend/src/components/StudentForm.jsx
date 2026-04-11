@@ -3,7 +3,7 @@ import axios from 'axios'
 
 const CLASSES = ['A', 'B', 'C', 'D']
 const ANNEES  = ['1ère année', '2ème année', '3ème année', '4ème année', '5ème année']
-const API_URL = 'http://10.10.0.53:8000'
+const API_URL = ''
 
 export default function StudentForm({ onSuccess }) {
   const [form,    setForm]    = useState({ nom:'', prenom:'', email:'', classe:'', annee_scolaire:'' })
@@ -17,7 +17,14 @@ export default function StudentForm({ onSuccess }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await axios.post(`${API_URL}/api/enroll`, form)
+      const formData = new FormData()
+      formData.append('nom', form.nom)
+      formData.append('prenom', form.prenom)
+      formData.append('email', form.email)
+      formData.append('classe', form.classe)
+      formData.append('annee_scolaire', form.annee_scolaire)
+
+      const res = await axios.post(`${API_URL}/api/enroll`, formData)
       onSuccess(res.data.student_id)
     } catch (err) {
       setError(err.response?.data?.detail || "Erreur lors de l'inscription")
