@@ -85,3 +85,14 @@ def get_student_face(db: Session, student_id):
     return db.query(StudentFace).filter(
         StudentFace.student_id == student_id
     ).first()
+
+
+def update_student_face(db: Session, student_id, embedding, det_score: float):
+    """Met à jour l'embedding d'un étudiant existant — recalibrage"""
+    face = get_student_face(db, student_id)
+    if face:
+        face.embedding  = embedding.tolist()
+        face.det_score  = det_score
+        db.commit()
+        db.refresh(face)
+    return face
