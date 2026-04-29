@@ -1,28 +1,44 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from config import engine, Base
-from db.models import Student, StudentFace, StudentFaceTemp
-from routes.enrollment  import router as enroll_router
-from routes.recognition import router as recog_router
+from config import init_db, FRONTEND_URL
+from routes.enrollment import router as enroll_router
+from routes.recognition import router as recognition_router
 
-app = FastAPI(title="SmartCampus IA")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# ── App ───────────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title       = "SmartCampus IA",
+    description = "Plateforme intelligente de gestion des étudiants",
+    version     = "2.0.0"
 )
 
-@app.on_event("startup")
-def startup():
-    Base.metadata.create_all(bind=engine)
-    print("Tables créées avec succès")
+# ── CORS ──────────────────────────────────────────────────────────────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins     = [FRONTEND_URL, "http://localhost:5173", "https://localhost:5173"],
+    allow_credentials = True,
+    allow_methods     = ["*"],
+    allow_headers     = ["*"],
+)
 
-app.include_router(enroll_router,  prefix="/api")
-app.include_router(recog_router,   prefix="/api")
+# ── Routers ───────────────────────────────────────────────────────────────────
+app.include_router(enroll_router,      prefix="/api")
+app.include_router(recognition_router, prefix="/api")
+
+# ── Startup ───────────────────────────────────────────────────────────────────
+@app.on_event("startup")
+async def startup():
+    init_db()
+
 
 @app.get("/")
-def root():
-    return {"status": "ok", "message": "SmartCampus IA en ligne"}
+async def root():
+    return {
+        "app":     "SmartCampus IA",
+        "version": "2.0.0",
+        "status":  "running"
+    }
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}

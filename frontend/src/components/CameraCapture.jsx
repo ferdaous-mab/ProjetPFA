@@ -3,7 +3,24 @@ import axios from "axios";
 
 const API_URL        = "";
 const TARGET_FRAMES  = 5;
-const CAPTURE_INTERVAL = 1000; // 1s — fluide
+const CAPTURE_INTERVAL = 800;
+
+// Instructions visuelles pour chaque angle
+const ANGLE_ICONS = {
+  0: "⬤",   // centre
+  1: "→",   // droite
+  2: "←",   // gauche
+  3: "↑",   // haut
+  4: "↓",   // bas
+};
+
+const ANGLE_LABELS = [
+  "Centre",
+  "Droite",
+  "Gauche",
+  "Haut",
+  "Bas",
+];
 
 export default function CameraCapture({ studentId, onComplete }) {
   const videoRef    = useRef(null);
@@ -11,21 +28,23 @@ export default function CameraCapture({ studentId, onComplete }) {
   const intervalRef = useRef(null);
   const streamRef   = useRef(null);
   const finalizing  = useRef(false);
-  const capturing   = useRef(false); // évite les appels simultanés
+  const capturing   = useRef(false);
 
-  const [framesOk,   setFramesOk]   = useState(0);
-  const [status,     setStatus]     = useState("init");
-  const [message,    setMessage]    = useState("Positionnez votre visage");
-  const [hint,       setHint]       = useState("");
-  const [errorMsg,   setErrorMsg]   = useState("");
-  const [ringColor,  setRingColor]  = useState("#94a3b8");
+  const [framesOk,    setFramesOk]    = useState(0);
+  const [status,      setStatus]      = useState("init");
+  const [message,     setMessage]     = useState("Positionnez votre visage");
+  const [hint,        setHint]        = useState("");
+  const [hintType,    setHintType]    = useState("warn");
+  const [ringColor,   setRingColor]   = useState("#94a3b8");
+  const [nextAngleId, setNextAngleId] = useState(0);
+  const [captured,    setCaptured]    = useState([]); // angles capturés
 
   useEffect(() => { startCamera(); return () => stopAll(); }, []);
 
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 640, height: 480 },
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -34,9 +53,10 @@ export default function CameraCapture({ studentId, onComplete }) {
       }
       setStatus("capturing");
       setMessage("Regardez droit devant");
+      setNextAngleId(0);
     } catch (err) {
       setStatus("error");
-      setErrorMsg("Caméra inaccessible : " + err.message);
+      setHint("Caméra inaccessible : " + err.message);
     }
   };
 
@@ -49,7 +69,7 @@ export default function CameraCapture({ studentId, onComplete }) {
     if (status !== "capturing") return;
     intervalRef.current = setInterval(captureFrame, CAPTURE_INTERVAL);
     return () => clearInterval(intervalRef.current);
-  }, [status, framesOk]);
+  }, [status, framesOk, nextAngleId]);
 
   const captureFrame = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
@@ -58,12 +78,15 @@ export default function CameraCapture({ studentId, onComplete }) {
 
     capturing.current = true;
 
+    const video  = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = 320; canvas.height = 240;
-    canvas.getContext("2d").drawImage(videoRef.current, 0, 0, 320, 240);
+    canvas.width  = video.videoWidth  || 640;
+    canvas.height = video.videoHeight || 480;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
 
     canvas.toBlob(async (blob) => {
       if (!blob) { capturing.current = false; return; }
+
       const form = new FormData();
       form.append("student_id", studentId);
       form.append("image", blob, "frame.jpg");
@@ -75,29 +98,37 @@ export default function CameraCapture({ studentId, onComplete }) {
           const n = data.frames_captured;
           setFramesOk(n);
           setRingColor("#6366f1");
-          setMessage(data.next_instruction || "Continuez");
-          setHint("");
+          setCaptured(prev => [...prev, data.angle_captured]);
+          setHint(`✓ ${data.angle_captured} capturé !`);
+          setHintType("ok");
+          setTimeout(() => {
+            setHint("");
+            setMessage(data.next_angle || "Continuez");
+            setNextAngleId(data.next_angle_id ?? -1);
+          }, 800);
 
-          if (n >= TARGET_FRAMES && !finalizing.current) {
+          if (data.ready_to_finalize && !finalizing.current) {
             finalizing.current = true;
             clearInterval(intervalRef.current);
             setStatus("finalizing");
-            setMessage("Traitement...");
+            setMessage("Traitement en cours...");
+            setHint("");
             await finalize();
           }
         } else {
           setRingColor("#f59e0b");
-          setHint(data.reason || "Bougez la tête");
-          setTimeout(() => setRingColor("#6366f1"), 600);
+          setHint(data.reason || "Ajustez votre position");
+          setHintType("warn");
+          setTimeout(() => setRingColor(framesOk > 0 ? "#6366f1" : "#94a3b8"), 600);
         }
       } catch {
-        setRingColor("#ef4444");
-        setTimeout(() => setRingColor("#94a3b8"), 600);
+        setHint("Erreur réseau...");
+        setHintType("warn");
       } finally {
         capturing.current = false;
       }
-    }, "image/jpeg", 0.85);
-  }, [framesOk, studentId]);
+    }, "image/jpeg", 1.0);
+  }, [framesOk, studentId, nextAngleId]);
 
   const finalize = async () => {
     stopAll();
@@ -108,17 +139,16 @@ export default function CameraCapture({ studentId, onComplete }) {
       setStatus("done");
       setMessage("Enrôlement réussi !");
       setRingColor("#22c55e");
-      setTimeout(() => onComplete?.(), 1800);
+      setTimeout(() => onComplete?.(), 2000);
     } catch (err) {
       setStatus("error");
-      setErrorMsg(err.response?.data?.detail || "Erreur finalisation");
+      setHint(err.response?.data?.detail || "Erreur finalisation");
       finalizing.current = false;
     }
   };
 
-  // ── Dessin ────────────────────────────────────────────────────────────────
-  const R  = 130;
-  const C  = 2 * Math.PI * R;
+  const R      = 130;
+  const C      = 2 * Math.PI * R;
   const offset = C * (1 - framesOk / TARGET_FRAMES);
 
   return (
@@ -127,14 +157,41 @@ export default function CameraCapture({ studentId, onComplete }) {
       display: "flex", flexDirection: "column",
       alignItems: "center", justifyContent: "center",
       fontFamily: "'Plus Jakarta Sans', sans-serif",
-      padding: "24px", gap: "24px",
+      padding: "24px", gap: "20px",
     }}>
 
+      {/* Titre */}
       <div style={{ textAlign: "center" }}>
         <h1 style={{ fontSize: "21px", fontWeight: 700, color: "#1e1b4b", margin: 0 }}>
           Enrôlement facial
         </h1>
         <p style={{ color: "#94a3b8", fontSize: "13px", margin: "4px 0 0" }}>SmartCampus IA</p>
+      </div>
+
+      {/* Indicateurs d'angles */}
+      <div style={{ display: "flex", gap: 8 }}>
+        {ANGLE_LABELS.map((label, i) => {
+          const done = captured.includes(label.toLowerCase()) ||
+                       captured.includes(["centre","droite","gauche","haut","bas"][i]);
+          const current = nextAngleId === i && status === "capturing";
+          return (
+            <div key={i} style={{
+              width: 44, height: 44, borderRadius: "50%",
+              display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+              background: done ? "#6366f1" : current ? "#e0e7ff" : "#f1f5f9",
+              border: current ? "2px solid #6366f1" : "2px solid transparent",
+              transition: "all 0.3s",
+            }}>
+              <span style={{ fontSize: 16, color: done ? "white" : current ? "#6366f1" : "#94a3b8" }}>
+                {done ? "✓" : ANGLE_ICONS[i]}
+              </span>
+              <span style={{ fontSize: 8, color: done ? "white" : "#94a3b8", marginTop: 1 }}>
+                {label}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       {/* Cercle + vidéo */}
@@ -157,6 +214,22 @@ export default function CameraCapture({ studentId, onComplete }) {
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 70,
             }}>✓</div>
+          )}
+
+          {/* Flèche de guidage sur la vidéo */}
+          {status === "capturing" && nextAngleId >= 0 && (
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              pointerEvents: "none",
+            }}>
+              <span style={{
+                fontSize: 48, opacity: 0.4, color: "white",
+                textShadow: "0 0 10px rgba(99,102,241,0.8)",
+              }}>
+                {ANGLE_ICONS[nextAngleId]}
+              </span>
+            </div>
           )}
         </div>
 
@@ -187,17 +260,20 @@ export default function CameraCapture({ studentId, onComplete }) {
       </div>
 
       {/* Messages */}
-      <div style={{ textAlign: "center" }}>
+      <div style={{ textAlign: "center", minHeight: 60 }}>
         <p style={{ fontSize: "17px", fontWeight: 700, color: "#1e1b4b", margin: 0 }}>
           {message}
         </p>
         {hint && (
-          <p style={{ fontSize: "13px", color: "#f59e0b", fontWeight: 600, margin: "6px 0 0" }}>
-            ↩ {hint}
+          <p style={{
+            fontSize: "13px", fontWeight: 600, margin: "6px 0 0",
+            color: hintType === "ok" ? "#22c55e" : "#f59e0b",
+          }}>
+            {hint}
           </p>
         )}
         {status === "capturing" && (
-          <p style={{ color: "#94a3b8", fontSize: "12px", margin: "8px 0 0" }}>
+          <p style={{ color: "#94a3b8", fontSize: "12px", margin: "6px 0 0" }}>
             {framesOk}/{TARGET_FRAMES} angles capturés
           </p>
         )}
@@ -206,25 +282,13 @@ export default function CameraCapture({ studentId, onComplete }) {
             width: 26, height: 26, borderRadius: "50%",
             border: "3px solid #e2e8f0", borderTop: `3px solid ${ringColor}`,
             animation: "spin 0.7s linear infinite",
-            margin: "12px auto 0",
+            margin: "10px auto 0",
           }} />
         )}
         {status === "error" && (
-          <p style={{ color: "#ef4444", fontSize: "13px", marginTop: 8 }}>{errorMsg}</p>
+          <p style={{ color: "#ef4444", fontSize: "13px", marginTop: 8 }}>{hint}</p>
         )}
       </div>
-
-      {status === "capturing" && (
-        <div style={{
-          background: "white", borderRadius: 14, padding: "12px 18px",
-          boxShadow: "0 4px 20px rgba(99,102,241,0.08)",
-          maxWidth: 280, textAlign: "center",
-        }}>
-          <p style={{ color: "#64748b", fontSize: "13px", margin: 0, lineHeight: 1.6 }}>
-            🔄 Tournez lentement la tête <strong>gauche → droite</strong>
-          </p>
-        </div>
-      )}
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap');
