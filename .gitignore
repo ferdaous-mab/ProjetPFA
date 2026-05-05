@@ -4,3 +4,4 @@ __pycache__/
 .env
 *.onnx
 models/
+node_modules/

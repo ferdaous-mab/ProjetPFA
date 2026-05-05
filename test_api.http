@@ -1,5 +1,5 @@
 ### Test 1 : Créer un étudiant
-POST http://localhost:8000/api/enroll
+POST http://192.168.1.64:8000/api/enroll
 Content-Type: application/json
 
 {
@@ -10,7 +10,7 @@ Content-Type: application/json
 }
 
 ### Test 2 : Email déjà existant
-POST http://localhost:8000/api/enroll
+POST http://192.168.1.64:8000/api/enroll
 Content-Type: application/json
 
 {
@@ -21,7 +21,7 @@ Content-Type: application/json
 }
 
 ### Test 3 : Email invalide
-POST http://localhost:8000/api/enroll
+POST http://192.168.1.64:8000/api/enroll
 Content-Type: application/json
 
 {
