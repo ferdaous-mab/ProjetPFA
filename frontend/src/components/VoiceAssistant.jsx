@@ -7,7 +7,16 @@ function getToken() {
   return localStorage.getItem("token");
 }
 
-export default function VoiceAssistant({ onClose }) {
+const DEFAULT_SUGGESTIONS = [
+  "Taux de présence global ?",
+  "Étudiants à risque ?",
+  "Combien d'alertes ?",
+  "Résumé de la plateforme",
+  "Combien d'étudiants ?",
+  "Moyenne générale ?",
+];
+
+export default function VoiceAssistant({ onClose, chatEndpoint = "/api/voice/chat", suggestions = DEFAULT_SUGGESTIONS }) {
   const [status,     setStatus]     = useState("idle");
   const [messages,   setMessages]   = useState([
     { role: "assistant", text: "Bonjour ! Je suis votre assistant SmartCampus. Appuyez sur le micro et posez votre question, ou tapez-la directement." }
@@ -123,7 +132,7 @@ export default function VoiceAssistant({ onClose }) {
   const sendToChat = async (text) => {
     try {
       const res = await axios.post(
-        `${API_URL}/api/voice/chat`,
+        `${API_URL}${chatEndpoint}`,
         { message: text },
         {
           headers: {
@@ -171,15 +180,6 @@ export default function VoiceAssistant({ onClose }) {
 
   const isRecording  = status === "recording";
   const isProcessing = status === "processing";
-
-  const SUGGESTIONS = [
-    "Taux de présence global ?",
-    "Étudiants à risque ?",
-    "Combien d'alertes ?",
-    "Résumé de la plateforme",
-    "Combien d'étudiants ?",
-    "Moyenne générale ?",
-  ];
 
   return (
     <div style={{
@@ -330,7 +330,7 @@ export default function VoiceAssistant({ onClose }) {
 
           {/* Suggestions */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-            {SUGGESTIONS.map((q, i) => (
+            {suggestions.map((q, i) => (
               <button key={i} onClick={() => {
                 setInputText(q);
                 addMessage("user", q);

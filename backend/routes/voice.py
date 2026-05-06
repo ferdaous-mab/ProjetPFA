@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from auth.dependencies import admin_only, get_db
+from auth.dependencies import admin_only, admin_or_prof, get_db
 import httpx
 import os
 import asyncio
@@ -92,7 +92,7 @@ def generate_response(message: str, db: Session) -> str:
 @router.post("/voice/transcribe")
 async def transcribe_audio(
     audio: UploadFile = File(...),
-    _=Depends(admin_only)
+    _=Depends(admin_or_prof)
 ):
     try:
         audio_bytes = await audio.read()
@@ -171,4 +171,126 @@ async def chat_smart(
         return {"reply": reply}
     except Exception as e:
         print(f"[CHAT ERROR] {e}")
+        return {"reply": "Erreur lors du traitement de votre demande."}
+
+
+def generate_response_prof(message: str, db: Session, user) -> str:
+    from db.models import Student, Attendance, Matiere, Alert
+    from db.models import Session as SessionModel
+    from datetime import datetime, timezone
+
+    msg = message.lower()
+
+    matieres = db.query(Matiere).filter(Matiere.professeur_id == user.id).all()
+    nb_matieres = len(matieres)
+
+    # Calcul global présence sur toutes les matières du prof
+    total_att = present = absent = 0
+    for m in matieres:
+        sessions = db.query(SessionModel).filter(SessionModel.matiere_id == m.id).all()
+        for s in sessions:
+            t = db.query(Attendance).filter(Attendance.session_id == s.id).count()
+            p = db.query(Attendance).filter(
+                Attendance.session_id == s.id, Attendance.status == "present"
+            ).count()
+            a = db.query(Attendance).filter(
+                Attendance.session_id == s.id, Attendance.status == "absent"
+            ).count()
+            total_att += t
+            present   += p
+            absent    += a
+
+    taux = round(present / total_att * 100, 1) if total_att > 0 else 0
+
+    # Alertes professeur
+    alertes = db.query(Alert).filter(
+        Alert.target_role == "professeur", Alert.is_read == False
+    ).count()
+
+    # Sessions aujourd'hui
+    today = datetime.now(timezone.utc).date()
+    sessions_today = []
+    for m in matieres:
+        sessions = db.query(SessionModel).filter(
+            SessionModel.matiere_id == m.id, SessionModel.date == today
+        ).all()
+        for s in sessions:
+            sessions_today.append((m.nom, s))
+
+    # Étudiants absents (tous cours confondus)
+    seen = set()
+    absents_list = []
+    for m in matieres:
+        sessions = db.query(SessionModel).filter(SessionModel.matiere_id == m.id).all()
+        for s in sessions:
+            atts = db.query(Attendance).filter(
+                Attendance.session_id == s.id, Attendance.status == "absent"
+            ).all()
+            for a in atts:
+                student = db.query(Student).filter(Student.id == a.student_id).first()
+                if student and str(student.id) not in seen:
+                    seen.add(str(student.id))
+                    total_abs = db.query(Attendance).filter(
+                        Attendance.student_id == student.id, Attendance.status == "absent"
+                    ).count()
+                    absents_list.append((student, total_abs))
+
+    absents_list.sort(key=lambda x: x[1], reverse=True)
+
+    if any(w in msg for w in ["bonjour", "salut", "hello", "bonsoir"]):
+        return (f"Bonjour ! Vous enseignez {nb_matieres} matière(s) avec un taux de présence "
+                f"moyen de {taux}%. {alertes} alerte(s) non lue(s).")
+
+    if any(w in msg for w in ["présence", "presence", "taux"]):
+        if nb_matieres == 0:
+            return "Vous n'avez aucune matière assignée pour le moment."
+        return (f"Taux de présence global dans vos cours : {taux}%. "
+                f"Sur {total_att} présences enregistrées, {present} présents et {absent} absents.")
+
+    if any(w in msg for w in ["absent", "absence", "manqu"]):
+        if not absents_list:
+            return "Aucun étudiant absent dans vos cours. Excellent !"
+        top = ", ".join([f"{s.prenom} {s.nom} ({n} abs.)" for s, n in absents_list[:3]])
+        return (f"Il y a {len(absents_list)} étudiant(s) avec des absences dans vos cours. "
+                f"Les plus absents : {top}.")
+
+    if any(w in msg for w in ["matière", "matiere", "cours", "enseign"]):
+        if nb_matieres == 0:
+            return "Aucune matière ne vous est assignée pour le moment."
+        noms = ", ".join([m.nom for m in matieres])
+        return f"Vous enseignez {nb_matieres} matière(s) : {noms}."
+
+    if any(w in msg for w in ["aujourd", "session", "séance"]):
+        if not sessions_today:
+            return "Vous n'avez aucune séance prévue aujourd'hui."
+        details = ", ".join([f"{nom}" for nom, _ in sessions_today])
+        return f"Vous avez {len(sessions_today)} séance(s) aujourd'hui : {details}."
+
+    if any(w in msg for w in ["alerte", "alert", "notification"]):
+        if alertes == 0:
+            return "Aucune alerte non lue pour le moment."
+        return f"Il y a {alertes} alerte(s) non lue(s) vous concernant."
+
+    if any(w in msg for w in ["résumé", "resume", "bilan", "statistique", "overview"]):
+        return (f"Bilan : {nb_matieres} matière(s), taux de présence {taux}%, "
+                f"{len(absents_list)} étudiant(s) avec absences, {alertes} alerte(s) non lue(s).")
+
+    return ("Je n'ai pas compris votre question. Vous pouvez me demander : "
+            "le taux de présence, vos matières, les absences, "
+            "les sessions d'aujourd'hui, ou les alertes.")
+
+
+@router.post("/voice/chat-prof")
+async def chat_prof(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(admin_or_prof)
+):
+    try:
+        print(f"[CHAT-PROF] Question: {req.message}")
+        reply = generate_response_prof(req.message, db, current_user)
+        print(f"[CHAT-PROF] Réponse: {reply}")
+        return {"reply": reply}
+    except Exception as e:
+        print(f"[CHAT-PROF ERROR] {e}")
         return {"reply": "Erreur lors du traitement de votre demande."}

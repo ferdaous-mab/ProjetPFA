@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import VoiceAssistant from "../components/VoiceAssistant";
 
 const API_URL = "";
 
@@ -39,12 +40,22 @@ function EmptyState({ message }) {
 }
 
 export default function ProfDashboard({ user, onLogout }) {
-  const [overview,  setOverview]  = useState(null);
-  const [today,     setToday]     = useState([]);
-  const [absents,   setAbsents]   = useState([]);
-  const [alertes,   setAlertes]   = useState([]);
-  const [activeTab, setActiveTab] = useState("overview");
-  const [loading,   setLoading]   = useState(true);
+  const [overview,   setOverview]  = useState(null);
+  const [today,      setToday]     = useState([]);
+  const [absents,    setAbsents]   = useState([]);
+  const [alertes,    setAlertes]   = useState([]);
+  const [activeTab,  setActiveTab] = useState("overview");
+  const [loading,    setLoading]   = useState(true);
+  const [showVoice,  setShowVoice] = useState(false);
+
+  const PROF_SUGGESTIONS = [
+    "Taux de présence ?",
+    "Mes matières ?",
+    "Étudiants absents ?",
+    "Sessions aujourd'hui ?",
+    "Alertes ?",
+    "Bilan de mes cours",
+  ];
 
   useEffect(() => { loadAll(); }, []);
 
@@ -83,6 +94,14 @@ export default function ProfDashboard({ user, onLogout }) {
       fontFamily: "'Sora', sans-serif", color: "#fff" }}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap')"}</style>
 
+      {showVoice && (
+        <VoiceAssistant
+          onClose={() => setShowVoice(false)}
+          chatEndpoint="/api/voice/chat-prof"
+          suggestions={PROF_SUGGESTIONS}
+        />
+      )}
+
       {/* Header */}
       <div style={{
         borderBottom: "1px solid rgba(255,255,255,0.07)",
@@ -107,6 +126,13 @@ export default function ProfDashboard({ user, onLogout }) {
           <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
             {user?.prenom} {user?.nom}
           </span>
+          <button onClick={() => setShowVoice(true)} style={{
+            background: "linear-gradient(135deg,#6366f1,#a855f7)",
+            border: "none", borderRadius: 8,
+            color: "#fff", cursor: "pointer",
+            padding: "6px 14px", fontFamily: "Sora, sans-serif",
+            fontSize: 12, fontWeight: 600,
+          }}>🎤 Assistant IA</button>
           <button onClick={onLogout} style={{
             background: "rgba(255,255,255,0.05)",
             border: "1px solid rgba(255,255,255,0.1)",
