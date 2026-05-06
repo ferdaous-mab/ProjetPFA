@@ -4,7 +4,9 @@ import axios from "axios";
 const API_URL = "";
 
 function authHeaders() {
-  return { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } };
+  const token = localStorage.getItem("token");
+  console.log("Token:", token ? "OK" : "MANQUANT");
+  return { headers: { Authorization: `Bearer ${token}` } };
 }
 
 function Card({ children, style = {} }) {

@@ -4,6 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell,
 } from "recharts";
+import VoiceAssistant from "../components/VoiceAssistant";
 
 const API_URL = "";
 const COLORS  = ["#6366f1", "#ef4444", "#f59e0b", "#22c55e"];
@@ -11,7 +12,9 @@ const JOURS   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
 const CLASSES = ["A", "B", "C"];
 
 function authHeaders() {
-  return { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } };
+  const token = localStorage.getItem("token");
+  console.log("Token:", token ? "OK" : "MANQUANT");
+  return { headers: { Authorization: `Bearer ${token}` } };
 }
 
 function Card({ children, style = {} }) {
@@ -114,6 +117,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [alertes,     setAlertes]     = useState([]);
   const [activeTab,   setActiveTab]   = useState("overview");
   const [loading,     setLoading]     = useState(true);
+  const [showVoice,   setShowVoice]   = useState(false);
 
   // Gestion state
   const [profs,     setProfs]     = useState([]);
@@ -121,12 +125,10 @@ export default function AdminDashboard({ user, onLogout }) {
   const [emplois,   setEmplois]   = useState({});
   const [etudiants, setEtudiants] = useState([]);
   const [gTab,      setGTab]      = useState("profs");
-
-  // Forms
-  const [formProf,   setFormProf]   = useState({ nom:"", prenom:"", email:"", password:"" });
-  const [formMat,    setFormMat]    = useState({ nom:"", code:"", coefficient:"1", classe:"A", professeur_id:"" });
-  const [formEmploi, setFormEmploi] = useState({ matiere_id:"", classe:"A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
-  const [msg,        setMsg]        = useState("");
+  const [formProf,  setFormProf]  = useState({ nom:"", prenom:"", email:"", password:"" });
+  const [formMat,   setFormMat]   = useState({ nom:"", code:"", coefficient:"1", classe:"A", professeur_id:"" });
+  const [formEmploi,setFormEmploi]= useState({ matiere_id:"", classe:"A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
+  const [msg,       setMsg]       = useState("");
 
   useEffect(() => { loadBI(); }, []);
   useEffect(() => { if (activeTab === "gestion") loadGestion(); }, [activeTab]);
@@ -239,10 +241,10 @@ export default function AdminDashboard({ user, onLogout }) {
   ];
 
   const gTabs = [
-    { id: "profs",     label: "Professeurs", icon: "👨‍🏫" },
-    { id: "matieres",  label: "Matières",    icon: "📚" },
+    { id: "profs",     label: "Professeurs",     icon: "👨‍🏫" },
+    { id: "matieres",  label: "Matières",        icon: "📚" },
     { id: "emplois",   label: "Emploi du temps", icon: "📅" },
-    { id: "etudiants", label: "Étudiants",   icon: "🎓" },
+    { id: "etudiants", label: "Étudiants",       icon: "🎓" },
   ];
 
   const severityColor = s =>
@@ -252,6 +254,9 @@ export default function AdminDashboard({ user, onLogout }) {
     <div style={{ minHeight: "100vh", background: "#05050f",
       fontFamily: "'Sora', sans-serif", color: "#fff" }}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap')"}</style>
+
+      {/* Voice Assistant Modal */}
+      {showVoice && <VoiceAssistant onClose={() => setShowVoice(false)} />}
 
       {/* Header */}
       <div style={{
@@ -273,13 +278,21 @@ export default function AdminDashboard({ user, onLogout }) {
             fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
           }}>Admin</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {overview?.alertes_non_lues > 0 && (
             <div style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444",
               fontSize: 12, padding: "4px 10px", borderRadius: 20, fontWeight: 600 }}>
-              🔔 {overview.alertes_non_lues} alertes
+              🔔 {overview.alertes_non_lues}
             </div>
           )}
+          {/* Bouton Assistant IA */}
+          <button onClick={() => setShowVoice(true)} style={{
+            background: "rgba(99,102,241,0.15)",
+            border: "1px solid rgba(99,102,241,0.3)",
+            borderRadius: 8, color: "#6366f1",
+            cursor: "pointer", padding: "6px 14px",
+            fontFamily: "Sora, sans-serif", fontSize: 12, fontWeight: 600,
+          }}>🎤 Assistant IA</button>
           <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
             {user?.prenom} {user?.nom}
           </span>
@@ -319,7 +332,7 @@ export default function AdminDashboard({ user, onLogout }) {
             color: "rgba(255,255,255,0.3)" }}>Chargement...</div>
         )}
 
-        {/* ── Vue d'ensemble ── */}
+        {/* Vue d'ensemble */}
         {!loading && activeTab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
@@ -336,145 +349,136 @@ export default function AdminDashboard({ user, onLogout }) {
               <StatCard icon="⚠️" label="Alertes" color="#ef4444"
                 value={overview?.alertes_non_lues || 0} sub="non lues" />
             </div>
-
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
               <Card>
                 <SectionTitle title="Présence par classe" icon="📊" />
-                {presClasse.length === 0
-                  ? <EmptyState message="Aucune donnée" />
-                  : <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={presClasse}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                        <XAxis dataKey="classe" stroke="rgba(255,255,255,0.3)" fontSize={12} />
-                        <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} unit="%" />
-                        <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
-                          formatter={v => [`${v}%`, "Taux"]} />
-                        <Bar dataKey="taux_presence" fill="#6366f1" radius={[6,6,0,0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                {presClasse.length === 0 ? <EmptyState message="Aucune donnée" /> :
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={presClasse}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="classe" stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                      <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} unit="%" />
+                      <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
+                        formatter={v => [`${v}%`, "Taux"]} />
+                      <Bar dataKey="taux_presence" fill="#6366f1" radius={[6,6,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 }
               </Card>
-
               <Card>
                 <SectionTitle title="Répartition présences" icon="🥧" />
-                {!repartition || repartition.total === 0
-                  ? <EmptyState message="Aucune donnée" />
-                  : <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-                      <PieChart width={180} height={180}>
-                        <Pie data={[
-                          { name: "Présent", value: repartition.present },
-                          { name: "Absent",  value: repartition.absent  },
-                          { name: "Retard",  value: repartition.retard  },
-                        ]} cx={85} cy={85} innerRadius={50} outerRadius={80} dataKey="value">
-                          {COLORS.map((c, i) => <Cell key={i} fill={COLORS[i]} />)}
-                        </Pie>
-                        <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }} />
-                      </PieChart>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                        {[
-                          { label: "Présents", pct: repartition.pct_present, color: "#6366f1" },
-                          { label: "Absents",  pct: repartition.pct_absent,  color: "#ef4444" },
-                          { label: "Retards",  pct: repartition.pct_retard,  color: "#f59e0b" },
-                        ].map(item => (
-                          <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <div style={{ width: 10, height: 10, borderRadius: 2, background: item.color }} />
-                            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.7)" }}>{item.label}</span>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: item.color, marginLeft: "auto" }}>
-                              {item.pct}%
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                {!repartition || repartition.total === 0 ? <EmptyState message="Aucune donnée" /> :
+                  <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+                    <PieChart width={180} height={180}>
+                      <Pie data={[
+                        { name: "Présent", value: repartition.present },
+                        { name: "Absent",  value: repartition.absent  },
+                        { name: "Retard",  value: repartition.retard  },
+                      ]} cx={85} cy={85} innerRadius={50} outerRadius={80} dataKey="value">
+                        {COLORS.map((c, i) => <Cell key={i} fill={COLORS[i]} />)}
+                      </Pie>
+                      <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }} />
+                    </PieChart>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {[
+                        { label: "Présents", pct: repartition.pct_present, color: "#6366f1" },
+                        { label: "Absents",  pct: repartition.pct_absent,  color: "#ef4444" },
+                        { label: "Retards",  pct: repartition.pct_retard,  color: "#f59e0b" },
+                      ].map(item => (
+                        <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ width: 10, height: 10, borderRadius: 2, background: item.color }} />
+                          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.7)" }}>{item.label}</span>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: item.color, marginLeft: "auto" }}>
+                            {item.pct}%
+                          </span>
+                        </div>
+                      ))}
                     </div>
+                  </div>
                 }
               </Card>
             </div>
-
             <Card>
               <SectionTitle title="Évolution des présences (30 jours)" icon="📈" />
-              {evolution.length === 0
-                ? <EmptyState message="Aucune session enregistrée" />
-                : <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={evolution}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                      <XAxis dataKey="date" stroke="rgba(255,255,255,0.3)" fontSize={10} tickFormatter={d => d.slice(5)} />
-                      <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} unit="%" domain={[0,100]} />
-                      <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
-                        formatter={v => [`${v}%`, "Taux"]} />
-                      <Line type="monotone" dataKey="taux_presence" stroke="#6366f1" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
+              {evolution.length === 0 ? <EmptyState message="Aucune session" /> :
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={evolution}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="date" stroke="rgba(255,255,255,0.3)" fontSize={10} tickFormatter={d => d.slice(5)} />
+                    <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} unit="%" domain={[0,100]} />
+                    <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
+                      formatter={v => [`${v}%`, "Taux"]} />
+                    <Line type="monotone" dataKey="taux_presence" stroke="#6366f1" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
               }
             </Card>
           </div>
         )}
 
-        {/* ── Présences ── */}
+        {/* Présences */}
         {!loading && activeTab === "presences" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <Card>
               <SectionTitle title="Taux par matière" icon="📚" />
-              {presMat.length === 0
-                ? <EmptyState message="Aucune matière" />
-                : <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={presMat} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                      <XAxis type="number" stroke="rgba(255,255,255,0.3)" fontSize={12} unit="%" domain={[0,100]} />
-                      <YAxis type="category" dataKey="matiere" stroke="rgba(255,255,255,0.3)" fontSize={11} width={140} />
-                      <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
-                        formatter={v => [`${v}%`, "Taux"]} />
-                      <Bar dataKey="taux_presence" fill="#0ea5e9" radius={[0,6,6,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+              {presMat.length === 0 ? <EmptyState message="Aucune matière" /> :
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={presMat} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis type="number" stroke="rgba(255,255,255,0.3)" fontSize={12} unit="%" domain={[0,100]} />
+                    <YAxis type="category" dataKey="matiere" stroke="rgba(255,255,255,0.3)" fontSize={11} width={140} />
+                    <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
+                      formatter={v => [`${v}%`, "Taux"]} />
+                    <Bar dataKey="taux_presence" fill="#0ea5e9" radius={[0,6,6,0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               }
             </Card>
             <Card>
               <SectionTitle title="Top 10 absences" icon="🔴" />
-              {topAbsences.length === 0
-                ? <EmptyState message="Aucune absence" />
-                : <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                        {["Étudiant","Classe","Absences","Taux"].map(h => (
-                          <th key={h} style={{ padding: "10px 12px", textAlign: "left",
-                            color: "rgba(255,255,255,0.4)", fontSize: 12, fontWeight: 500 }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topAbsences.map((s, i) => (
-                        <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                          <td style={{ padding: "10px 12px", fontSize: 14 }}>{s.prenom} {s.nom}</td>
-                          <td style={{ padding: "10px 12px" }}>
-                            <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
-                              padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>Classe {s.classe}</span>
-                          </td>
-                          <td style={{ padding: "10px 12px", color: "#ef4444", fontWeight: 600 }}>{s.absences}</td>
-                          <td style={{ padding: "10px 12px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <div style={{ flex: 1, height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3 }}>
-                                <div style={{ width: `${s.taux_absence}%`, height: "100%",
-                                  background: "#ef4444", borderRadius: 3 }} />
-                              </div>
-                              <span style={{ fontSize: 12, color: "#ef4444" }}>{s.taux_absence}%</span>
-                            </div>
-                          </td>
-                        </tr>
+              {topAbsences.length === 0 ? <EmptyState message="Aucune absence" /> :
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                      {["Étudiant","Classe","Absences","Taux"].map(h => (
+                        <th key={h} style={{ padding: "10px 12px", textAlign: "left",
+                          color: "rgba(255,255,255,0.4)", fontSize: 12, fontWeight: 500 }}>{h}</th>
                       ))}
-                    </tbody>
-                  </table>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topAbsences.map((s, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                        <td style={{ padding: "10px 12px", fontSize: 14 }}>{s.prenom} {s.nom}</td>
+                        <td style={{ padding: "10px 12px" }}>
+                          <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
+                            padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>Classe {s.classe}</span>
+                        </td>
+                        <td style={{ padding: "10px 12px", color: "#ef4444", fontWeight: 600 }}>{s.absences}</td>
+                        <td style={{ padding: "10px 12px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ flex: 1, height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3 }}>
+                              <div style={{ width: `${s.taux_absence}%`, height: "100%",
+                                background: "#ef4444", borderRadius: 3 }} />
+                            </div>
+                            <span style={{ fontSize: 12, color: "#ef4444" }}>{s.taux_absence}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               }
             </Card>
           </div>
         )}
 
-        {/* ── Risques ── */}
+        {/* Risques */}
         {!loading && activeTab === "risques" && (
           <Card>
             <SectionTitle title="Étudiants à risque" icon="⚠️" />
-            {risque.length === 0
-              ? <EmptyState message="Aucun étudiant à risque 🎉" />
-              : risque.map((s, i) => (
+            {risque.length === 0 ? <EmptyState message="Aucun étudiant à risque 🎉" /> :
+              risque.map((s, i) => (
                 <div key={i} style={{
                   background: "rgba(239,68,68,0.06)",
                   border: "1px solid rgba(239,68,68,0.15)",
@@ -507,37 +511,35 @@ export default function AdminDashboard({ user, onLogout }) {
           </Card>
         )}
 
-        {/* ── Notes ── */}
+        {/* Notes */}
         {!loading && activeTab === "notes" && (
           <Card>
             <SectionTitle title="Moyenne par matière" icon="📝" />
-            {notesMat.length === 0
-              ? <EmptyState message="Aucune note" />
-              : <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={notesMat}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="matiere" stroke="rgba(255,255,255,0.3)" fontSize={11} />
-                    <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} domain={[0,20]} />
-                    <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
-                      formatter={v => [`${v}/20`, "Moyenne"]} />
-                    <Bar dataKey="moyenne" radius={[6,6,0,0]}>
-                      {notesMat.map((n, i) => (
-                        <Cell key={i} fill={n.moyenne >= 10 ? "#22c55e" : "#ef4444"} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+            {notesMat.length === 0 ? <EmptyState message="Aucune note" /> :
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={notesMat}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="matiere" stroke="rgba(255,255,255,0.3)" fontSize={11} />
+                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} domain={[0,20]} />
+                  <Tooltip contentStyle={{ background: "#111", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
+                    formatter={v => [`${v}/20`, "Moyenne"]} />
+                  <Bar dataKey="moyenne" radius={[6,6,0,0]}>
+                    {notesMat.map((n, i) => (
+                      <Cell key={i} fill={n.moyenne >= 10 ? "#22c55e" : "#ef4444"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             }
           </Card>
         )}
 
-        {/* ── Alertes ── */}
+        {/* Alertes */}
         {!loading && activeTab === "alertes" && (
           <Card>
             <SectionTitle title="Alertes récentes" icon="🔔" />
-            {alertes.length === 0
-              ? <EmptyState message="Aucune alerte ✅" />
-              : alertes.map((a, i) => (
+            {alertes.length === 0 ? <EmptyState message="Aucune alerte ✅" /> :
+              alertes.map((a, i) => (
                 <div key={i} style={{
                   background: `${severityColor(a.severity)}10`,
                   border: `1px solid ${severityColor(a.severity)}30`,
@@ -561,11 +563,9 @@ export default function AdminDashboard({ user, onLogout }) {
           </Card>
         )}
 
-        {/* ── Gestion ── */}
+        {/* Gestion */}
         {activeTab === "gestion" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-
-            {/* Message flash */}
             {msg && (
               <div style={{
                 background: msg.startsWith("✅") ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
@@ -574,8 +574,6 @@ export default function AdminDashboard({ user, onLogout }) {
                 color: msg.startsWith("✅") ? "#22c55e" : "#ef4444",
               }}>{msg}</div>
             )}
-
-            {/* Sous-onglets */}
             <div style={{ display: "flex", gap: 8 }}>
               {gTabs.map(t => (
                 <button key={t.id} onClick={() => setGTab(t.id)} style={{
@@ -587,7 +585,7 @@ export default function AdminDashboard({ user, onLogout }) {
               ))}
             </div>
 
-            {/* ── Professeurs ── */}
+            {/* Professeurs */}
             {gTab === "profs" && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
                 <Card>
@@ -608,9 +606,8 @@ export default function AdminDashboard({ user, onLogout }) {
                 </Card>
                 <Card>
                   <SectionTitle title={`Professeurs (${profs.length})`} icon="👨‍🏫" />
-                  {profs.length === 0
-                    ? <EmptyState message="Aucun professeur" />
-                    : profs.map((p, i) => (
+                  {profs.length === 0 ? <EmptyState message="Aucun professeur" /> :
+                    profs.map((p, i) => (
                       <div key={i} style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between",
                         padding: "10px 0", borderBottom: i < profs.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
@@ -621,9 +618,8 @@ export default function AdminDashboard({ user, onLogout }) {
                             {p.email} · {p.nb_matieres} matières
                           </div>
                         </div>
-                        <Btn onClick={() => deleteProf(p.id)} color="#ef4444" style={{ padding: "6px 12px", fontSize: 12 }}>
-                          Désactiver
-                        </Btn>
+                        <Btn onClick={() => deleteProf(p.id)} color="#ef4444"
+                          style={{ padding: "6px 12px", fontSize: 12 }}>Désactiver</Btn>
                       </div>
                     ))
                   }
@@ -631,7 +627,7 @@ export default function AdminDashboard({ user, onLogout }) {
               </div>
             )}
 
-            {/* ── Matières ── */}
+            {/* Matières */}
             {gTab === "matieres" && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
                 <Card>
@@ -661,9 +657,8 @@ export default function AdminDashboard({ user, onLogout }) {
                 </Card>
                 <Card>
                   <SectionTitle title={`Matières (${matieres.length})`} icon="📚" />
-                  {matieres.length === 0
-                    ? <EmptyState message="Aucune matière" />
-                    : matieres.map((m, i) => (
+                  {matieres.length === 0 ? <EmptyState message="Aucune matière" /> :
+                    matieres.map((m, i) => (
                       <div key={i} style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between",
                         padding: "10px 0", borderBottom: i < matieres.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
@@ -671,17 +666,14 @@ export default function AdminDashboard({ user, onLogout }) {
                         <div>
                           <div style={{ fontWeight: 500, fontSize: 14 }}>
                             {m.nom}
-                            <span style={{ marginLeft: 8, color: "#6366f1", fontSize: 11 }}>
-                              Coef {m.coefficient}
-                            </span>
+                            <span style={{ marginLeft: 8, color: "#6366f1", fontSize: 11 }}>Coef {m.coefficient}</span>
                           </div>
                           <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
                             Classe {m.classe} · {m.professeur || "Aucun prof"}
                           </div>
                         </div>
-                        <Btn onClick={() => deleteMat(m.id)} color="#ef4444" style={{ padding: "6px 12px", fontSize: 12 }}>
-                          Supprimer
-                        </Btn>
+                        <Btn onClick={() => deleteMat(m.id)} color="#ef4444"
+                          style={{ padding: "6px 12px", fontSize: 12 }}>Supprimer</Btn>
                       </div>
                     ))
                   }
@@ -689,7 +681,7 @@ export default function AdminDashboard({ user, onLogout }) {
               </div>
             )}
 
-            {/* ── Emploi du temps ── */}
+            {/* Emploi du temps */}
             {gTab === "emplois" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 <Card>
@@ -719,10 +711,9 @@ export default function AdminDashboard({ user, onLogout }) {
                   </div>
                   <Btn onClick={addEmploi} style={{ marginTop: 12 }}>Ajouter le créneau</Btn>
                 </Card>
-
                 {CLASSES.map(classe => (
                   <Card key={classe}>
-                    <SectionTitle title={`Emploi du temps — Classe ${classe}`} icon="📅" />
+                    <SectionTitle title={`Classe ${classe}`} icon="📅" />
                     {!emplois[classe] || emplois[classe].length === 0
                       ? <EmptyState message={`Aucun créneau pour la classe ${classe}`} />
                       : <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -730,7 +721,7 @@ export default function AdminDashboard({ user, onLogout }) {
                             <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
                               {["Jour","Matière","Horaire","Salle","Action"].map(h => (
                                 <th key={h} style={{ padding: "8px 12px", textAlign: "left",
-                                  color: "rgba(255,255,255,0.4)", fontSize: 12, fontWeight: 500 }}>{h}</th>
+                                  color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
                               ))}
                             </tr>
                           </thead>
@@ -740,16 +731,12 @@ export default function AdminDashboard({ user, onLogout }) {
                                 <td style={{ padding: "8px 12px", fontSize: 13 }}>{e.jour}</td>
                                 <td style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500 }}>{e.matiere}</td>
                                 <td style={{ padding: "8px 12px", fontSize: 12,
-                                  color: "rgba(255,255,255,0.5)" }}>
-                                  {e.heure_debut} → {e.heure_fin}
-                                </td>
+                                  color: "rgba(255,255,255,0.5)" }}>{e.heure_debut} → {e.heure_fin}</td>
                                 <td style={{ padding: "8px 12px", fontSize: 12,
                                   color: "rgba(255,255,255,0.5)" }}>{e.salle || "-"}</td>
                                 <td style={{ padding: "8px 12px" }}>
                                   <Btn onClick={() => deleteEmploi(e.id)} color="#ef4444"
-                                    style={{ padding: "4px 10px", fontSize: 11 }}>
-                                    Supprimer
-                                  </Btn>
+                                    style={{ padding: "4px 10px", fontSize: 11 }}>Supprimer</Btn>
                                 </td>
                               </tr>
                             ))}
@@ -761,64 +748,55 @@ export default function AdminDashboard({ user, onLogout }) {
               </div>
             )}
 
-            {/* ── Étudiants ── */}
+            {/* Étudiants */}
             {gTab === "etudiants" && (
               <Card>
                 <SectionTitle title={`Étudiants (${etudiants.length})`} icon="🎓" />
-                {etudiants.length === 0
-                  ? <EmptyState message="Aucun étudiant enregistré" />
-                  : <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                          {["Photo","Étudiant","Classe","Email","Statut","Action"].map(h => (
-                            <th key={h} style={{ padding: "10px 12px", textAlign: "left",
-                              color: "rgba(255,255,255,0.4)", fontSize: 12, fontWeight: 500 }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {etudiants.map((s, i) => (
-                          <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                            <td style={{ padding: "10px 12px" }}>
-                              <div style={{ width: 36, height: 36, borderRadius: "50%",
-                                background: "linear-gradient(135deg,#6366f1,#a855f7)",
-                                overflow: "hidden", display: "flex", alignItems: "center",
-                                justifyContent: "center", fontSize: 16 }}>
-                                {s.photo_url
-                                  ? <img src={s.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                  : "🎓"}
-                              </div>
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: 14 }}>
-                              {s.prenom} {s.nom}
-                            </td>
-                            <td style={{ padding: "10px 12px" }}>
-                              <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
-                                padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>
-                                Classe {s.classe}
-                              </span>
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: 12,
-                              color: "rgba(255,255,255,0.4)" }}>{s.email}</td>
-                            <td style={{ padding: "10px 12px" }}>
-                              <span style={{
-                                background: s.is_enrolled ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)",
-                                color: s.is_enrolled ? "#22c55e" : "#f59e0b",
-                                padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                              }}>
-                                {s.is_enrolled ? "Enrôlé" : "Non enrôlé"}
-                              </span>
-                            </td>
-                            <td style={{ padding: "10px 12px" }}>
-                              <Btn onClick={() => deleteEtudiant(s.id)} color="#ef4444"
-                                style={{ padding: "5px 12px", fontSize: 12 }}>
-                                Supprimer
-                              </Btn>
-                            </td>
-                          </tr>
+                {etudiants.length === 0 ? <EmptyState message="Aucun étudiant" /> :
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                        {["Photo","Étudiant","Classe","Email","Statut","Action"].map(h => (
+                          <th key={h} style={{ padding: "10px 12px", textAlign: "left",
+                            color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
                         ))}
-                      </tbody>
-                    </table>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {etudiants.map((s, i) => (
+                        <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                          <td style={{ padding: "10px 12px" }}>
+                            <div style={{ width: 36, height: 36, borderRadius: "50%",
+                              background: "linear-gradient(135deg,#6366f1,#a855f7)",
+                              overflow: "hidden", display: "flex", alignItems: "center",
+                              justifyContent: "center", fontSize: 16 }}>
+                              {s.photo_url
+                                ? <img src={s.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                                : "🎓"}
+                            </div>
+                          </td>
+                          <td style={{ padding: "10px 12px", fontSize: 14 }}>{s.prenom} {s.nom}</td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
+                              padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>Classe {s.classe}</span>
+                          </td>
+                          <td style={{ padding: "10px 12px", fontSize: 12,
+                            color: "rgba(255,255,255,0.4)" }}>{s.email}</td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <span style={{
+                              background: s.is_enrolled ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)",
+                              color: s.is_enrolled ? "#22c55e" : "#f59e0b",
+                              padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                            }}>{s.is_enrolled ? "Enrôlé" : "Non enrôlé"}</span>
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <Btn onClick={() => deleteEtudiant(s.id)} color="#ef4444"
+                              style={{ padding: "5px 12px", fontSize: 12 }}>Supprimer</Btn>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 }
               </Card>
             )}
