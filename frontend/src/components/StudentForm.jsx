@@ -6,7 +6,7 @@ const ANNEES  = ['1ère année', '2ème année', '3ème année', '4ème année',
 const API_URL = ''
 
 export default function StudentForm({ onSuccess }) {
-  const [form,    setForm]    = useState({ nom:'', prenom:'', email:'', classe:'', annee_scolaire:'' })
+  const [form,    setForm]    = useState({ nom:'', prenom:'', email:'', classe:'', annee_scolaire:'', password:'', confirmPassword:'' })
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
 
@@ -14,6 +14,14 @@ export default function StudentForm({ onSuccess }) {
 
   const handleSubmit = async e => {
     e.preventDefault()
+    if (form.password !== form.confirmPassword) {
+      setError("Les mots de passe ne correspondent pas")
+      return
+    }
+    if (form.password.length < 6) {
+      setError("Le mot de passe doit contenir au moins 6 caractères")
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -25,7 +33,7 @@ export default function StudentForm({ onSuccess }) {
       formData.append('annee_scolaire', form.annee_scolaire)
 
       const res = await axios.post(`${API_URL}/api/enroll`, formData)
-      onSuccess(res.data.student_id)
+      onSuccess(res.data.student_id, form.email, form.password, form.nom, form.prenom)
     } catch (err) {
       setError(err.response?.data?.detail || "Erreur lors de l'inscription")
     } finally {
@@ -120,7 +128,7 @@ export default function StudentForm({ onSuccess }) {
               onChange={handleChange} required placeholder="youssef@esisa.ac.ma" />
           </div>
 
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'24px' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'16px' }}>
             <div>
               <label className="sf-label">Année scolaire</label>
               <select className="sf-input" name="annee_scolaire" value={form.annee_scolaire}
@@ -139,8 +147,20 @@ export default function StudentForm({ onSuccess }) {
             </div>
           </div>
 
+          <div style={{ marginBottom:'16px' }}>
+            <label className="sf-label">Mot de passe</label>
+            <input className="sf-input" name="password" type="password" value={form.password}
+              onChange={handleChange} required placeholder="Minimum 6 caractères" />
+          </div>
+
+          <div style={{ marginBottom:'24px' }}>
+            <label className="sf-label">Confirmer le mot de passe</label>
+            <input className="sf-input" name="confirmPassword" type="password" value={form.confirmPassword}
+              onChange={handleChange} required placeholder="Répétez le mot de passe" />
+          </div>
+
           <button type="submit" className="sf-btn" disabled={loading}>
-            {loading ? 'Enregistrement...' : 'Continuer vers la capture →'}
+            {loading ? 'Enregistrement...' : 'Continuer vers la capture faciale →'}
           </button>
         </form>
 

@@ -30,7 +30,7 @@ def generate_response(message: str, db: Session) -> str:
     present        = db.query(Attendance).filter(Attendance.status == "present").count()
     absent         = db.query(Attendance).filter(Attendance.status == "absent").count()
     taux_global    = round(present / total_att * 100, 1) if total_att > 0 else 0
-    total_profs    = db.query(User).filter(User.role == "professeur").count()
+    total_profs    = db.query(User).filter(User.role == "professeur", User.is_active == True).count()
     alertes        = db.query(Alert).filter(Alert.is_read == False).count()
     at_risk        = get_students_at_risk(db, absence_threshold=3, grade_threshold=10.0)
 

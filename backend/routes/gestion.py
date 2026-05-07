@@ -95,7 +95,7 @@ async def create_professeur(
 
 
 @router.delete("/gestion/professeurs/{prof_id}")
-async def delete_professeur(
+async def deactivate_professeur(
     prof_id: str,
     db: Session = Depends(get_db),
     _=Depends(admin_only)
@@ -107,6 +107,36 @@ async def delete_professeur(
     user.is_active = False
     db.commit()
     return {"success": True, "message": "Compte désactivé"}
+
+
+@router.put("/gestion/professeurs/{prof_id}/reactivate")
+async def reactivate_professeur(
+    prof_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Réactiver un compte professeur."""
+    user = db.query(User).filter(User.id == prof_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Professeur introuvable")
+    user.is_active = True
+    db.commit()
+    return {"success": True, "message": "Compte réactivé"}
+
+
+@router.delete("/gestion/professeurs/{prof_id}/permanent")
+async def permanently_delete_professeur(
+    prof_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Supprimer définitivement un compte professeur."""
+    user = db.query(User).filter(User.id == prof_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Professeur introuvable")
+    db.delete(user)
+    db.commit()
+    return {"success": True, "message": "Compte supprimé définitivement"}
 
 
 # ── MATIÈRES ──────────────────────────────────────────────────────────────────
@@ -255,7 +285,7 @@ async def get_etudiants_list(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Liste tous les étudiants."""
+    """Liste tous les étudiants avec statut du compte utilisateur."""
     from db.models import StudentImage
     students = get_all_students(db)
     result   = []
@@ -264,16 +294,49 @@ async def get_etudiants_list(
             StudentImage.student_id == s.id,
             StudentImage.is_primary == True
         ).first()
+        user_account = db.query(User).filter(User.student_id == s.id).first()
         result.append({
-            "id":          str(s.id),
-            "nom":         s.nom,
-            "prenom":      s.prenom,
-            "email":       s.email,
-            "classe":      s.classe,
-            "is_enrolled": s.is_enrolled,
-            "photo_url":   photo.url if photo else None,
+            "id":             str(s.id),
+            "nom":            s.nom,
+            "prenom":         s.prenom,
+            "email":          s.email,
+            "classe":         s.classe,
+            "is_enrolled":    s.is_enrolled,
+            "photo_url":      photo.url if photo else None,
+            "has_account":    user_account is not None,
+            "account_active": user_account.is_active if user_account else None,
         })
     return result
+
+
+@router.put("/gestion/etudiants/{student_id}/deactivate")
+async def deactivate_etudiant(
+    student_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Désactiver le compte d'un étudiant."""
+    user = db.query(User).filter(User.student_id == student_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Aucun compte associé à cet étudiant")
+    user.is_active = False
+    db.commit()
+    return {"success": True, "message": "Compte désactivé"}
+
+
+@router.put("/gestion/etudiants/{student_id}/reactivate")
+async def reactivate_etudiant(
+    student_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Réactiver le compte d'un étudiant."""
+    user = db.query(User).filter(User.student_id == student_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Aucun compte associé à cet étudiant")
+    user.is_active = True
+    db.commit()
+    return {"success": True, "message": "Compte réactivé"}
 
 
 @router.delete("/gestion/etudiants/{student_id}")
@@ -282,7 +345,7 @@ async def delete_etudiant(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Supprimer un étudiant."""
+    """Supprimer définitivement un étudiant."""
     success = delete_student(db, student_id)
     if not success:
         raise HTTPException(status_code=404, detail="Étudiant introuvable")

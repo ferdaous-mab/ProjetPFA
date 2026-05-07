@@ -25,7 +25,7 @@ async def get_overview(
     enrolled        = db.query(Student).filter(Student.is_enrolled == True).count()
     total_sessions  = db.query(SessionModel).count()
     total_matieres  = db.query(Matiere).count()
-    total_profs     = db.query(User).filter(User.role == "professeur").count()
+    total_profs     = db.query(User).filter(User.role == "professeur", User.is_active == True).count()
     total_alerts    = db.query(Alert).filter(Alert.is_read == False).count()
 
     # Taux de présence global

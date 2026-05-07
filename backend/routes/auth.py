@@ -17,7 +17,7 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     email:     str
     password:  str
-    role:      str        # admin | professeur | etudiant
+    role:      str        # etudiant uniquement (profs créés par l'admin)
     nom:       str
     prenom:    str
 
@@ -44,8 +44,11 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
     Créer un compte utilisateur.
     Si role=etudiant, lie le compte à l'étudiant correspondant (même email).
     """
-    if req.role not in ["admin", "professeur", "etudiant"]:
-        raise HTTPException(status_code=400, detail="Rôle invalide")
+    if req.role != "etudiant":
+        raise HTTPException(
+            status_code=400,
+            detail="L'inscription publique est réservée aux étudiants. Les comptes professeurs sont créés par l'administrateur."
+        )
 
     if get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="Email déjà utilisé")

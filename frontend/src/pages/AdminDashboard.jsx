@@ -186,10 +186,36 @@ export default function AdminDashboard({ user, onLogout }) {
     } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
   };
 
-  const deleteProf = async (id) => {
+  const deactivateProf = async (id) => {
     if (!confirm("Désactiver ce professeur ?")) return;
     await axios.delete(`${API_URL}/api/gestion/professeurs/${id}`, authHeaders());
     showMsg("✅ Professeur désactivé");
+    loadGestion();
+  };
+
+  const reactivateProf = async (id) => {
+    await axios.put(`${API_URL}/api/gestion/professeurs/${id}/reactivate`, {}, authHeaders());
+    showMsg("✅ Professeur réactivé");
+    loadGestion();
+  };
+
+  const permanentDeleteProf = async (id) => {
+    if (!confirm("Supprimer définitivement ce professeur ? Cette action est irréversible.")) return;
+    await axios.delete(`${API_URL}/api/gestion/professeurs/${id}/permanent`, authHeaders());
+    showMsg("✅ Professeur supprimé définitivement");
+    loadGestion();
+  };
+
+  const deactivateEtudiant = async (id) => {
+    if (!confirm("Désactiver le compte de cet étudiant ?")) return;
+    await axios.put(`${API_URL}/api/gestion/etudiants/${id}/deactivate`, {}, authHeaders());
+    showMsg("✅ Compte étudiant désactivé");
+    loadGestion();
+  };
+
+  const reactivateEtudiant = async (id) => {
+    await axios.put(`${API_URL}/api/gestion/etudiants/${id}/reactivate`, {}, authHeaders());
+    showMsg("✅ Compte étudiant réactivé");
     loadGestion();
   };
 
@@ -605,21 +631,39 @@ export default function AdminDashboard({ user, onLogout }) {
                   </div>
                 </Card>
                 <Card>
-                  <SectionTitle title={`Professeurs (${profs.length})`} icon="👨‍🏫" />
+                  <SectionTitle title={`Professeurs (${profs.filter(p => p.is_active).length} actifs${profs.some(p => !p.is_active) ? ` · ${profs.filter(p => !p.is_active).length} désactivés` : ""})`} icon="👨‍🏫" />
                   {profs.length === 0 ? <EmptyState message="Aucun professeur" /> :
                     profs.map((p, i) => (
                       <div key={i} style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "10px 0", borderBottom: i < profs.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                        padding: "12px 0", borderBottom: i < profs.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
                       }}>
                         <div>
-                          <div style={{ fontWeight: 500, fontSize: 14 }}>{p.prenom} {p.nom}</div>
-                          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontWeight: 500, fontSize: 14 }}>{p.prenom} {p.nom}</span>
+                            <span style={{
+                              fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 600,
+                              background: p.is_active ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                              color: p.is_active ? "#22c55e" : "#ef4444",
+                            }}>{p.is_active ? "Actif" : "Désactivé"}</span>
+                          </div>
+                          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, marginTop: 2 }}>
                             {p.email} · {p.nb_matieres} matières
                           </div>
                         </div>
-                        <Btn onClick={() => deleteProf(p.id)} color="#ef4444"
-                          style={{ padding: "6px 12px", fontSize: 12 }}>Désactiver</Btn>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {p.is_active ? (
+                            <Btn onClick={() => deactivateProf(p.id)} color="#ef4444"
+                              style={{ padding: "6px 12px", fontSize: 12 }}>Désactiver</Btn>
+                          ) : (
+                            <>
+                              <Btn onClick={() => reactivateProf(p.id)} color="#22c55e"
+                                style={{ padding: "6px 12px", fontSize: 12 }}>Réactiver</Btn>
+                              <Btn onClick={() => permanentDeleteProf(p.id)} color="#7f1d1d"
+                                style={{ padding: "6px 12px", fontSize: 12 }}>Supprimer</Btn>
+                            </>
+                          )}
+                        </div>
                       </div>
                     ))
                   }
@@ -756,7 +800,7 @@ export default function AdminDashboard({ user, onLogout }) {
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                        {["Photo","Étudiant","Classe","Email","Statut","Action"].map(h => (
+                        {["Photo","Étudiant","Classe","Email","Enrôlement","Compte","Actions"].map(h => (
                           <th key={h} style={{ padding: "10px 12px", textAlign: "left",
                             color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
                         ))}
@@ -790,8 +834,29 @@ export default function AdminDashboard({ user, onLogout }) {
                             }}>{s.is_enrolled ? "Enrôlé" : "Non enrôlé"}</span>
                           </td>
                           <td style={{ padding: "10px 12px" }}>
-                            <Btn onClick={() => deleteEtudiant(s.id)} color="#ef4444"
-                              style={{ padding: "5px 12px", fontSize: 12 }}>Supprimer</Btn>
+                            {s.has_account ? (
+                              <span style={{
+                                fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 600,
+                                background: s.account_active ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                                color: s.account_active ? "#22c55e" : "#ef4444",
+                              }}>{s.account_active ? "Actif" : "Désactivé"}</span>
+                            ) : (
+                              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>Aucun compte</span>
+                            )}
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              {s.has_account && s.account_active && (
+                                <Btn onClick={() => deactivateEtudiant(s.id)} color="#ef4444"
+                                  style={{ padding: "5px 10px", fontSize: 11 }}>Désactiver</Btn>
+                              )}
+                              {s.has_account && !s.account_active && (
+                                <Btn onClick={() => reactivateEtudiant(s.id)} color="#22c55e"
+                                  style={{ padding: "5px 10px", fontSize: 11 }}>Réactiver</Btn>
+                              )}
+                              <Btn onClick={() => deleteEtudiant(s.id)} color="#7f1d1d"
+                                style={{ padding: "5px 10px", fontSize: 11 }}>Supprimer</Btn>
+                            </div>
                           </td>
                         </tr>
                       ))}

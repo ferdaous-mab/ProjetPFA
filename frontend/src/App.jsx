@@ -51,10 +51,7 @@ export default function App() {
 
   if (page === "enroll") {
     return (
-      <EnrollPage
-        onComplete={() => setPage("login")}
-        onBack={() => setPage("login")}
-      />
+      <EnrollPage onGoToLogin={() => setPage("login")} />
     );
   }
 
