@@ -48,6 +48,10 @@ export default function ProfDashboard({ user, onLogout }) {
   const [loading,    setLoading]   = useState(true);
   const [showVoice,  setShowVoice] = useState(false);
 
+  const [pwForm,    setPwForm]    = useState({ current_password: "", new_password: "", confirm: "" });
+  const [pwMsg,     setPwMsg]     = useState("");
+  const [pwLoading, setPwLoading] = useState(false);
+
   const PROF_SUGGESTIONS = [
     "Taux de présence ?",
     "Mes matières ?",
@@ -79,11 +83,36 @@ export default function ProfDashboard({ user, onLogout }) {
     }
   };
 
+  const changePassword = async () => {
+    if (pwForm.new_password !== pwForm.confirm) {
+      setPwMsg("❌ Les mots de passe ne correspondent pas");
+      return;
+    }
+    if (pwForm.new_password.length < 6) {
+      setPwMsg("❌ Le mot de passe doit contenir au moins 6 caractères");
+      return;
+    }
+    setPwLoading(true);
+    try {
+      await axios.put(`${API_URL}/api/prof/change-password`, {
+        current_password: pwForm.current_password,
+        new_password:     pwForm.new_password,
+      }, authHeaders());
+      setPwMsg("✅ Mot de passe modifié avec succès");
+      setPwForm({ current_password: "", new_password: "", confirm: "" });
+    } catch (e) {
+      setPwMsg("❌ " + (e.response?.data?.detail || "Erreur"));
+    } finally {
+      setPwLoading(false);
+    }
+  };
+
   const tabs = [
     { id: "overview",  label: "Mes matières",      icon: "📚" },
     { id: "today",     label: "Aujourd'hui",        icon: "📅" },
     { id: "absents",   label: "Absences",           icon: "🔴" },
     { id: "alertes",   label: "Alertes",            icon: "🔔" },
+    { id: "profil",    label: "Mon profil",         icon: "👤" },
   ];
 
   const severityColor = s =>
@@ -324,6 +353,81 @@ export default function ProfDashboard({ user, onLogout }) {
               ))
             }
           </Card>
+        )}
+
+        {/* Profil */}
+        {activeTab === "profil" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <Card>
+              <SectionTitle title="Informations du compte" icon="👤" />
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {[
+                  { label: "Nom",    value: user?.nom },
+                  { label: "Prénom", value: user?.prenom },
+                  { label: "Email",  value: user?.email },
+                  { label: "Rôle",   value: "Professeur" },
+                ].map(({ label, value }) => (
+                  <div key={label} style={{
+                    display: "flex", justifyContent: "space-between",
+                    padding: "10px 0",
+                    borderBottom: "1px solid rgba(255,255,255,0.05)",
+                  }}>
+                    <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>{label}</span>
+                    <span style={{ fontWeight: 500, fontSize: 13 }}>{value || "—"}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card>
+              <SectionTitle title="Changer le mot de passe" icon="🔒" />
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {[
+                  { placeholder: "Mot de passe actuel", key: "current_password", type: "password" },
+                  { placeholder: "Nouveau mot de passe",  key: "new_password",     type: "password" },
+                  { placeholder: "Confirmer le nouveau mot de passe", key: "confirm", type: "password" },
+                ].map(({ placeholder, key, type }) => (
+                  <input
+                    key={key}
+                    type={type}
+                    placeholder={placeholder}
+                    value={pwForm[key]}
+                    onChange={e => setPwForm({ ...pwForm, [key]: e.target.value })}
+                    style={{
+                      width: "100%", padding: "10px 14px",
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 10, color: "#fff", fontSize: 13,
+                      fontFamily: "Sora, sans-serif", outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                ))}
+                <button
+                  onClick={changePassword}
+                  disabled={pwLoading}
+                  style={{
+                    padding: "9px 18px", border: "none", borderRadius: 9,
+                    background: "#0ea5e9", color: "#fff", cursor: "pointer",
+                    fontFamily: "Sora, sans-serif", fontSize: 13, fontWeight: 600,
+                    opacity: pwLoading ? 0.6 : 1,
+                  }}>
+                  {pwLoading ? "Modification..." : "Modifier le mot de passe"}
+                </button>
+                {pwMsg && (
+                  <div style={{
+                    padding: "10px 14px", borderRadius: 8, fontSize: 13,
+                    background: pwMsg.startsWith("✅")
+                      ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+                    border: `1px solid ${pwMsg.startsWith("✅") ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                    color: pwMsg.startsWith("✅") ? "#22c55e" : "#ef4444",
+                  }}>
+                    {pwMsg}
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
         )}
       </div>
     </div>

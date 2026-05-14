@@ -1,13 +1,39 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from auth.dependencies import admin_or_prof, get_current_user, get_db
+from auth.jwt_handler import hash_password, verify_password
 from db.models import (
     Student, Attendance, Grade, Matiere,
-    Session as SessionModel, Alert
+    Session as SessionModel, Alert, User
 )
 from datetime import datetime, timezone, date
 
 router = APIRouter()
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password:     str
+
+
+@router.put("/prof/change-password")
+async def change_password(
+    req:  ChangePasswordRequest,
+    db:   Session = Depends(get_db),
+    user           = Depends(get_current_user)
+):
+    """Permet au professeur de changer son mot de passe."""
+    if user.role not in ("professeur", "admin"):
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    if not verify_password(req.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect")
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit contenir au moins 6 caractères")
+    db_user = db.query(User).filter(User.id == user.id).first()
+    db_user.password_hash = hash_password(req.new_password)
+    db.commit()
+    return {"success": True, "message": "Mot de passe modifié avec succès"}
 
 
 @router.get("/prof/overview")

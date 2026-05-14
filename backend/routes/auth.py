@@ -8,6 +8,12 @@ from db.crud import (
     get_student_by_email, get_student_primary_image,
     get_absence_count, get_attendance_rate, get_average_by_student
 )
+from db.models import PasswordResetToken, User as UserModel
+from utils.email import send_reset_email
+from datetime import timedelta, timezone, datetime
+import secrets
+import os
+
 
 router = APIRouter()
 
@@ -156,3 +162,71 @@ async def logout():
     en supprimant le token du localStorage.
     """
     return {"message": "Déconnecté avec succès"}
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token:        str
+    new_password: str
+
+
+@router.post("/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Génère un token de reset et envoie un email. Toujours 200 pour ne pas révéler si l'email existe."""
+    user = get_user_by_email(db, req.email)
+    if user and user.is_active:
+        # Invalider les anciens tokens de cet utilisateur
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used == False
+        ).update({"used": True})
+        db.commit()
+
+        token      = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+        reset_token = PasswordResetToken(
+            user_id    = user.id,
+            token      = token,
+            expires_at = expires_at,
+        )
+        db.add(reset_token)
+        db.commit()
+
+        sent = send_reset_email(user.email, user.prenom, token)
+        if not sent:
+            # En dev : retourner le lien directement pour tester sans email
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+            print(f"📧 Lien de reset (dev) : {frontend_url}?token={token}")
+
+    return {"message": "Si cet email existe, un lien de réinitialisation a été envoyé."}
+
+
+@router.post("/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Valide le token et met à jour le mot de passe."""
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Le mot de passe doit contenir au moins 6 caractères")
+
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == req.token,
+        PasswordResetToken.used  == False,
+    ).first()
+
+    if not reset_token:
+        raise HTTPException(status_code=400, detail="Lien invalide ou déjà utilisé")
+
+    if datetime.now(timezone.utc) > reset_token.expires_at:
+        raise HTTPException(status_code=400, detail="Lien expiré — demandez un nouveau")
+
+    db_user = db.query(UserModel).filter(UserModel.id == reset_token.user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    db_user.password_hash = hash_password(req.new_password)
+    reset_token.used      = True
+    db.commit()
+
+    return {"success": True, "message": "Mot de passe modifié avec succès"}

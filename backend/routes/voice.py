@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from typing import Optional
 from auth.dependencies import admin_only, admin_or_prof, get_db
 import httpx
 import os
+import re
 import asyncio
 from dotenv import load_dotenv
 
@@ -16,6 +18,7 @@ ASSEMBLYAI_KEY = os.getenv("ASSEMBLYAI_API_KEY", "")
 
 class ChatRequest(BaseModel):
     message: str
+    pending_action: Optional[dict] = None
 
 
 def generate_response(message: str, db: Session) -> str:
@@ -89,6 +92,243 @@ def generate_response(message: str, db: Session) -> str:
             f"les étudiants à risque, les alertes, ou les statistiques générales.")
 
 
+# ── Voice Command Parsing ─────────────────────────────────────────────────────
+
+def extract_professor_params(message: str) -> dict:
+    params = {}
+    # Email
+    email_match = re.search(r'[\w.+\-]+@[\w\-]+\.[a-zA-Z]{2,}', message)
+    if email_match:
+        params["email"] = email_match.group()
+    # Password
+    pwd_match = re.search(r'(?:mot\s+de\s+passe|password|mdp)\s*[:\s]+(\S+)', message, re.IGNORECASE)
+    if pwd_match:
+        params["password"] = pwd_match.group(1).rstrip('.,;')
+    # Prénom
+    prenom_match = re.search(r'(?:pr[eé]nom)\s*[:\s]+([A-Za-zÀ-ÿ\-]+)', message, re.IGNORECASE)
+    if prenom_match:
+        params["prenom"] = prenom_match.group(1).capitalize()
+    # Nom (avoid "nom de passe")
+    nom_match = re.search(r'\bnom\s*[:\s]+([A-Za-zÀ-ÿ\-]+)', message, re.IGNORECASE)
+    if nom_match and nom_match.group(1).lower() not in ["de", "du", "la", "le", "passe"]:
+        params["nom"] = nom_match.group(1).capitalize()
+    # Fallback: "professeur/prof [Prenom] [Nom]"
+    if "prenom" not in params or "nom" not in params:
+        name_match = re.search(
+            r'(?:professeur|prof|enseignant)\s+([A-Za-zÀ-ÿ\-]+)\s+([A-Za-zÀ-ÿ\-]+)',
+            message, re.IGNORECASE
+        )
+        if name_match:
+            if "prenom" not in params:
+                params["prenom"] = name_match.group(1).capitalize()
+            if "nom" not in params:
+                params["nom"] = name_match.group(2).capitalize()
+    # Fallback: "s'appelle [Prenom] [Nom]"
+    if "prenom" not in params or "nom" not in params:
+        name_match2 = re.search(r"s'?appelle\s+([A-Za-zÀ-ÿ\-]+)\s+([A-Za-zÀ-ÿ\-]+)", message, re.IGNORECASE)
+        if name_match2:
+            if "prenom" not in params:
+                params["prenom"] = name_match2.group(1).capitalize()
+            if "nom" not in params:
+                params["nom"] = name_match2.group(2).capitalize()
+    return params
+
+
+def extract_matiere_params(message: str) -> dict:
+    params = {}
+    # Classe
+    classe_match = re.search(r'\bclasse\s*[:\s]*([ABC])\b', message, re.IGNORECASE)
+    params["classe"] = classe_match.group(1).upper() if classe_match else "A"
+    # Coefficient
+    coef_match = re.search(r'(?:coefficient|coeff?|coef)\s*[:\s]*(\d+(?:[.,]\d+)?)', message, re.IGNORECASE)
+    params["coefficient"] = float(coef_match.group(1).replace(',', '.')) if coef_match else 1.0
+    # Nom de la matière
+    name_match = re.search(
+        r'(?:mati[eè]re|cours|module)\s+(?:de\s+|d\')?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)(?:\s+(?:pour|de la classe|classe|coeff|coefficient|avec)|$)',
+        message, re.IGNORECASE
+    )
+    if name_match:
+        params["nom"] = name_match.group(1).strip().title()
+    else:
+        name_match2 = re.search(
+            r"(?:appel[lé][e]?|s'appelle|nommée?)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)(?:\s+(?:pour|classe)|$)",
+            message, re.IGNORECASE
+        )
+        if name_match2:
+            params["nom"] = name_match2.group(1).strip().title()
+    return params
+
+
+def find_professor_by_name(message: str, db: Session):
+    from db.models import User
+    profs = db.query(User).filter(User.role == "professeur").all()
+    msg_lower = message.lower()
+    for p in profs:
+        if p.nom.lower() in msg_lower and p.prenom.lower() in msg_lower:
+            return p
+    for p in profs:
+        if p.nom.lower() in msg_lower or p.prenom.lower() in msg_lower:
+            return p
+    return None
+
+
+# ── Constantes dialogue champ par champ ──────────────────────────────────────
+
+PROF_FIELDS = ["prenom", "nom", "email", "password"]
+PROF_QUESTIONS = {
+    "prenom":   "Quel est le prénom du professeur ?",
+    "nom":      "Quel est son nom de famille ?",
+    "email":    "Quelle est son adresse email ?",
+    "password": "Quel mot de passe souhaitez-vous lui attribuer ?",
+}
+
+MATIERE_FIELDS = ["nom", "classe", "coefficient"]
+MATIERE_QUESTIONS = {
+    "nom":         "Quel est le nom de la matière ?",
+    "classe":      "Pour quelle classe ? Répondez A, B ou C.",
+    "coefficient": "Quel est le coefficient ? (par défaut 1, appuyez sur Entrée pour ignorer)",
+}
+
+CANCEL_WORDS = ["annuler", "annule", "stop", "arrêter", "arrête", "non", "quitter", "abandonner"]
+
+
+def parse_field_value(field: str, message: str):
+    """Extrait la valeur d'un champ depuis une réponse courte."""
+    val = message.strip().rstrip('.,;!?')
+    if field == "email":
+        m = re.search(r'[\w.+\-]+@[\w\-]+\.[a-zA-Z]{2,}', message)
+        return m.group() if m else val.lower()
+    if field == "classe":
+        m = re.search(r'\b([ABC])\b', message.upper())
+        return m.group(1) if m else "A"
+    if field == "coefficient":
+        m = re.search(r'(\d+(?:[.,]\d+)?)', message)
+        return float(m.group(1).replace(',', '.')) if m else 1.0
+    return val.capitalize() if field in ("prenom", "nom") else val
+
+
+def _next_question(action: str, params: dict) -> tuple:
+    """Retourne (field, question) du prochain champ manquant, ou (None, None)."""
+    fields    = PROF_FIELDS    if action == "create_professor" else MATIERE_FIELDS
+    questions = PROF_QUESTIONS if action == "create_professor" else MATIERE_QUESTIONS
+    for f in fields:
+        if f not in params:
+            return f, questions[f]
+    return None, None
+
+
+def _incomplete(action: str, params: dict, field: str, question: str) -> dict:
+    return {"type": "incomplete", "action": action, "params": params,
+            "field": field, "reply": question}
+
+
+def _complete_professor(params: dict) -> dict:
+    return {
+        "type":   "action",
+        "action": "create_professor",
+        "params": params,
+        "reply":  f"Parfait ! Je vais créer le compte de {params['prenom']} {params['nom']} ({params['email']}). Confirmez-vous ?"
+    }
+
+
+def _complete_matiere(params: dict) -> dict:
+    return {
+        "type":   "action",
+        "action": "create_matiere",
+        "params": params,
+        "reply":  f"Je vais créer la matière '{params['nom']}' pour la classe {params.get('classe', 'A')} (coefficient {params.get('coefficient', 1.0)}). Confirmez-vous ?"
+    }
+
+
+def parse_command(message: str, db: Session, pending: dict = None) -> dict:
+    msg = message.lower()
+
+    # ── Annulation ───────────────────────────────────────────────────────────
+    if pending and any(w in msg for w in CANCEL_WORDS):
+        return {"type": "cancelled", "reply": "Action annulée. Comment puis-je vous aider ?"}
+
+    # ── Continuer un champ précis ─────────────────────────────────────────────
+    if pending and pending.get("field"):
+        action   = pending["action"]
+        field    = pending["field"]
+        existing = dict(pending.get("params", {}))
+
+        if action in ("create_professor", "create_matiere"):
+            existing[field] = parse_field_value(field, message)
+            next_f, question = _next_question(action, existing)
+            if next_f:
+                return _incomplete(action, existing, next_f, question)
+            return _complete_professor(existing) if action == "create_professor" else _complete_matiere(existing)
+
+        if action == "deactivate_professor":
+            professor = find_professor_by_name(message, db)
+            if professor:
+                return {
+                    "type": "action", "action": "deactivate_professor",
+                    "params": {"prof_id": str(professor.id), "nom": professor.nom,
+                               "prenom": professor.prenom, "email": professor.email},
+                    "reply": f"Je vais désactiver le compte de {professor.prenom} {professor.nom}. Confirmez-vous ?"
+                }
+            return _incomplete("deactivate_professor", {}, "name",
+                               "Je n'ai pas trouvé ce professeur. Donnez-moi son nom de famille exact.")
+
+    # ── Nouvelle commande ─────────────────────────────────────────────────────
+    create_kw = ["ajouter", "ajoute", "créer", "crée", "creer", "cree", "nouveau", "nouvelle",
+                 "enregistrer", "enregistre", "inscrire", "inscris"]
+
+    # 1. CRÉER UN PROFESSEUR
+    if any(w in msg for w in create_kw) and any(w in msg for w in ["professeur", "prof", "enseignant"]):
+        params = extract_professor_params(message)
+        next_f, question = _next_question("create_professor", params)
+        if next_f:
+            if not params:
+                question = "Quel est le prénom du professeur ?"
+            return _incomplete("create_professor", params, next_f, question)
+        return _complete_professor(params)
+
+    # 2. CRÉER UNE MATIÈRE
+    if any(w in msg for w in create_kw) and any(w in msg for w in ["matière", "matiere", "cours", "module"]):
+        params = extract_matiere_params(message)
+        next_f, question = _next_question("create_matiere", params)
+        if next_f:
+            return _incomplete("create_matiere", params, next_f, question)
+        return _complete_matiere(params)
+
+    # 3. DÉSACTIVER UN PROFESSEUR
+    if any(w in msg for w in ["désactiver", "desactiver", "suspendre", "bloquer", "désactivez"]) and \
+       any(w in msg for w in ["professeur", "prof", "enseignant"]):
+        professor = find_professor_by_name(message, db)
+        if professor:
+            return {
+                "type": "action", "action": "deactivate_professor",
+                "params": {"prof_id": str(professor.id), "nom": professor.nom,
+                           "prenom": professor.prenom, "email": professor.email},
+                "reply": f"Je vais désactiver le compte de {professor.prenom} {professor.nom}. Confirmez-vous ?"
+            }
+        return _incomplete("deactivate_professor", {}, "name",
+                           "Quel est le nom de famille du professeur à désactiver ?")
+
+    # Réponse informative par défaut
+    reply = generate_response(message, db)
+    return {"type": "query", "reply": reply}
+
+
+@router.post("/voice/command")
+async def voice_command(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    try:
+        print(f"[COMMAND] Message: {req.message} | Pending: {req.pending_action}")
+        result = parse_command(req.message, db, pending=req.pending_action)
+        print(f"[COMMAND] Type={result.get('type')} Action={result.get('action')}")
+        return result
+    except Exception as e:
+        print(f"[COMMAND ERROR] {e}")
+        return {"type": "query", "reply": "Erreur lors du traitement de votre commande."}
+
+
 @router.post("/voice/transcribe")
 async def transcribe_audio(
     audio: UploadFile = File(...),
@@ -97,20 +337,33 @@ async def transcribe_audio(
     try:
         audio_bytes = await audio.read()
         print(f"[ASSEMBLYAI] Audio reçu: {len(audio_bytes)} bytes")
+        if len(audio_bytes) < 1000:
+            return {"error": "Audio trop court — parlez plus longtemps avant de cliquer stop"}
 
         async with httpx.AsyncClient(timeout=60) as client:
 
             # Upload
             upload_res = await client.post(
                 "https://api.assemblyai.com/v2/upload",
-                headers={"authorization": ASSEMBLYAI_KEY},
+                headers={
+                    "authorization": ASSEMBLYAI_KEY,
+                    "content-type":  "application/octet-stream",
+                },
                 content=audio_bytes,
             )
-            upload_url = upload_res.json().get("upload_url")
-            print(f"[ASSEMBLYAI] Upload: {upload_res.status_code} → {upload_url[:40] if upload_url else 'FAILED'}")
+            print(f"[ASSEMBLYAI] Upload status: {upload_res.status_code}")
+            if upload_res.status_code != 200 or not upload_res.text.strip():
+                print(f"[ASSEMBLYAI] Upload body: {upload_res.text[:300]}")
+                return {"error": f"Upload échoué (HTTP {upload_res.status_code})"}
+            try:
+                upload_url = upload_res.json().get("upload_url")
+            except Exception:
+                print(f"[ASSEMBLYAI] Upload réponse non-JSON: {upload_res.text[:300]}")
+                return {"error": "Réponse upload invalide"}
 
             if not upload_url:
-                return {"error": "Upload échoué"}
+                return {"error": "Upload échoué — URL manquante"}
+            print(f"[ASSEMBLYAI] Upload OK → {upload_url[:50]}")
 
             # Transcription
             transcript_res = await client.post(
@@ -120,12 +373,21 @@ async def transcribe_audio(
                     "content-type": "application/json"
                 },
                 json={
-                    "audio_url": upload_url,
-                    "speech_models": ["universal-2"]
+                    "audio_url":     upload_url,
+                    "speech_models": ["universal-2"],
                 }
             )
-            transcript_data = transcript_res.json()
-            print(f"[ASSEMBLYAI] Transcript response: {transcript_data}")
+            print(f"[ASSEMBLYAI] Transcript status: {transcript_res.status_code}")
+            if transcript_res.status_code != 200 or not transcript_res.text.strip():
+                print(f"[ASSEMBLYAI] Transcript body: {transcript_res.text[:300]}")
+                return {"error": f"Transcription échouée (HTTP {transcript_res.status_code})"}
+            try:
+                transcript_data = transcript_res.json()
+            except Exception:
+                print(f"[ASSEMBLYAI] Transcript réponse non-JSON: {transcript_res.text[:300]}")
+                return {"error": "Réponse transcription invalide"}
+
+            print(f"[ASSEMBLYAI] Transcript data: {transcript_data}")
             transcript_id = transcript_data.get("id")
 
             if not transcript_id:

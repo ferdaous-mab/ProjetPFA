@@ -1,16 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from typing import Optional
 from auth.dependencies import admin_only, get_db
 from auth.jwt_handler import hash_password
+import secrets
+import string
 from db.crud import (
     create_user, get_user_by_email, get_users_by_role,
     create_matiere, get_all_matieres, get_matiere_by_id,
     create_emploi_temps, get_emplois_by_classe,
     get_all_students, delete_student,
 )
-from db.models import User, Matiere, EmploiTemps
+from db.models import User, Matiere, EmploiTemps, StudentImage, Attendance, Grade
 from datetime import time
 
 router = APIRouter()
@@ -22,7 +25,7 @@ class ProfCreate(BaseModel):
     nom:      str
     prenom:   str
     email:    str
-    password: str
+    password: Optional[str] = None
 
 
 class MatiereCreate(BaseModel):
@@ -76,22 +79,48 @@ async def get_professeurs(
     return result
 
 
+def _generate_password(length: int = 12) -> str:
+    alphabet = string.ascii_letters + string.digits + "!@#$%"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
 @router.post("/gestion/professeurs")
 async def create_professeur(
     req: ProfCreate,
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Créer un compte professeur."""
+    """Créer un compte professeur avec mot de passe aléatoire si non fourni."""
     if get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="Email déjà utilisé")
+    temp_password = req.password if req.password else _generate_password()
     user = create_user(
         db, email=req.email,
-        password_hash=hash_password(req.password),
+        password_hash=hash_password(temp_password),
         role="professeur", nom=req.nom, prenom=req.prenom,
     )
-    return {"success": True, "id": str(user.id),
-            "message": f"Compte créé pour {req.prenom} {req.nom}"}
+    return {
+        "success": True,
+        "id": str(user.id),
+        "message": f"Compte créé pour {req.prenom} {req.nom}",
+        "temp_password": temp_password,
+    }
+
+
+@router.post("/gestion/professeurs/{prof_id}/reset-password")
+async def reset_prof_password(
+    prof_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Génère un nouveau mot de passe aléatoire pour un professeur (affiché une seule fois)."""
+    user = db.query(User).filter(User.id == prof_id, User.role == "professeur").first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Professeur introuvable")
+    new_password = _generate_password()
+    user.password_hash = hash_password(new_password)
+    db.commit()
+    return {"success": True, "password": new_password}
 
 
 @router.delete("/gestion/professeurs/{prof_id}")
@@ -285,28 +314,165 @@ async def get_etudiants_list(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Liste tous les étudiants avec statut du compte utilisateur."""
-    from db.models import StudentImage
+    """Liste tous les étudiants — 6 requêtes bulk au lieu de N×6."""
     students = get_all_students(db)
-    result   = []
-    for s in students:
-        photo = db.query(StudentImage).filter(
-            StudentImage.student_id == s.id,
+    if not students:
+        return []
+
+    ids = [s.id for s in students]
+
+    # ── 1. Photos principales ──────────────────────────────────────────────────
+    photos = {
+        r.student_id: r.url
+        for r in db.query(StudentImage.student_id, StudentImage.url).filter(
+            StudentImage.student_id.in_(ids),
             StudentImage.is_primary == True
-        ).first()
-        user_account = db.query(User).filter(User.student_id == s.id).first()
+        ).all()
+    }
+
+    # ── 2. Comptes utilisateurs ────────────────────────────────────────────────
+    accounts = {
+        r.student_id: r
+        for r in db.query(User).filter(User.student_id.in_(ids)).all()
+    }
+
+    # ── 3. Nombre d'absences par étudiant ──────────────────────────────────────
+    abs_rows = db.query(
+        Attendance.student_id, func.count(Attendance.id)
+    ).filter(
+        Attendance.student_id.in_(ids),
+        Attendance.status == "absent"
+    ).group_by(Attendance.student_id).all()
+    abs_map = {sid: cnt for sid, cnt in abs_rows}
+
+    # ── 4. Total et présents par étudiant (deux requêtes agrégées) ────────────
+    total_rows = db.query(
+        Attendance.student_id, func.count(Attendance.id)
+    ).filter(Attendance.student_id.in_(ids)).group_by(Attendance.student_id).all()
+    total_map = {sid: cnt for sid, cnt in total_rows}
+
+    present_rows = db.query(
+        Attendance.student_id, func.count(Attendance.id)
+    ).filter(
+        Attendance.student_id.in_(ids),
+        Attendance.status == "present"
+    ).group_by(Attendance.student_id).all()
+    present_map = {sid: cnt for sid, cnt in present_rows}
+
+    taux_map = {
+        sid: round(present_map.get(sid, 0) / total * 100, 2)
+        for sid, total in total_map.items() if total > 0
+    }
+
+    # ── 5. Moyennes pondérées par étudiant ─────────────────────────────────────
+    grade_rows = db.query(
+        Grade.student_id, Grade.note, Matiere.coefficient
+    ).join(Matiere, Grade.matiere_id == Matiere.id).filter(
+        Grade.student_id.in_(ids)
+    ).all()
+
+    weighted: dict = {}
+    for sid, note, coef in grade_rows:
+        if sid not in weighted:
+            weighted[sid] = [0.0, 0.0]
+        weighted[sid][0] += note * coef
+        weighted[sid][1] += coef
+
+    moy_map = {
+        sid: round(ws / wt, 2)
+        for sid, (ws, wt) in weighted.items() if wt > 0
+    }
+
+    # ── Construction de la réponse ─────────────────────────────────────────────
+    result = []
+    for s in students:
+        acc = accounts.get(s.id)
         result.append({
-            "id":             str(s.id),
-            "nom":            s.nom,
-            "prenom":         s.prenom,
-            "email":          s.email,
-            "classe":         s.classe,
-            "is_enrolled":    s.is_enrolled,
-            "photo_url":      photo.url if photo else None,
-            "has_account":    user_account is not None,
-            "account_active": user_account.is_active if user_account else None,
+            "id":              str(s.id),
+            "nom":             s.nom,
+            "prenom":          s.prenom,
+            "email":           s.email,
+            "classe":          s.classe,
+            "annee_scolaire":  s.annee_scolaire,
+            "date_inscription": s.created_at.strftime("%d/%m/%Y") if s.created_at else None,
+            "is_enrolled":     s.is_enrolled,
+            "photo_url":       photos.get(s.id),
+            "has_account":     acc is not None,
+            "account_active":  acc.is_active if acc else None,
+            "absences":        abs_map.get(s.id, 0),
+            "taux_presence":   taux_map.get(s.id, 0.0),
+            "moyenne":         moy_map.get(s.id, 0.0),
+            "telephone":       s.telephone,
+            "date_naissance":  str(s.date_naissance) if s.date_naissance else None,
+            "lieu_naissance":  s.lieu_naissance,
+            "sexe":            s.sexe,
+            "adresse":         s.adresse,
+            "ville":           s.ville,
+            "cin":             s.cin,
+            "numero_carte":    s.numero_carte,
+            "nom_pere":        s.nom_pere,
+            "tel_pere":        s.tel_pere,
+            "nom_mere":        s.nom_mere,
+            "tel_mere":        s.tel_mere,
+            "email_parent":    s.email_parent,
         })
     return result
+
+
+class EtudiantUpdate(BaseModel):
+    nom:             Optional[str] = None
+    prenom:          Optional[str] = None
+    email:           Optional[str] = None
+    classe:          Optional[str] = None
+    annee_scolaire:  Optional[str] = None
+    telephone:       Optional[str] = None
+    date_naissance:  Optional[str] = None   # "YYYY-MM-DD"
+    lieu_naissance:  Optional[str] = None
+    sexe:            Optional[str] = None
+    adresse:         Optional[str] = None
+    ville:           Optional[str] = None
+    cin:             Optional[str] = None
+    numero_carte:    Optional[str] = None
+    nom_pere:        Optional[str] = None
+    tel_pere:        Optional[str] = None
+    nom_mere:        Optional[str] = None
+    tel_mere:        Optional[str] = None
+    email_parent:    Optional[str] = None
+
+
+@router.put("/gestion/etudiants/{student_id}")
+async def update_etudiant(
+    student_id: str,
+    req: EtudiantUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Modifier les informations d'un étudiant."""
+    from db.models import Student
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Étudiant introuvable")
+
+    fields = [
+        "nom", "prenom", "email", "classe", "annee_scolaire",
+        "telephone", "lieu_naissance", "sexe", "adresse", "ville",
+        "cin", "numero_carte", "nom_pere", "tel_pere",
+        "nom_mere", "tel_mere", "email_parent",
+    ]
+    for field in fields:
+        val = getattr(req, field, None)
+        if val is not None:
+            setattr(student, field, val)
+
+    if req.date_naissance:
+        from datetime import date as date_type
+        try:
+            student.date_naissance = date_type.fromisoformat(req.date_naissance)
+        except ValueError:
+            pass
+
+    db.commit()
+    return {"success": True, "message": "Étudiant mis à jour"}
 
 
 @router.put("/gestion/etudiants/{student_id}/deactivate")
