@@ -421,13 +421,14 @@ def get_students_at_risk(db: Session, absence_threshold: int = 3,
             reasons.append(f"moyenne {average}/20")
         if reasons:
             at_risk.append({
-                "student_id": str(student.id),
-                "nom":        student.nom,
-                "prenom":     student.prenom,
-                "classe":     student.classe,
-                "absences":   absences,
-                "moyenne":    average,
-                "raisons":    reasons,
+                "student_id":    str(student.id),
+                "nom":           student.nom,
+                "prenom":        student.prenom,
+                "classe":        student.classe,
+                "annee_scolaire": student.annee_scolaire,
+                "absences":      absences,
+                "moyenne":       average,
+                "raisons":       reasons,
             })
     return at_risk
 

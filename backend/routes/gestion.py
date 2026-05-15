@@ -252,7 +252,7 @@ async def get_emplois(
     _=Depends(admin_only)
 ):
     """Liste tous les créneaux de toutes les classes."""
-    classes = ["A", "B", "C"]
+    classes = ["1A", "1B", "1C", "2A", "2B", "2C", "3A", "3B", "3C"]
     result  = {}
     for classe in classes:
         emplois = get_emplois_by_classe(db, classe)

@@ -68,6 +68,7 @@ async def prof_overview(
             "nom":           m.nom,
             "code":          m.code,
             "classe":        m.classe,
+            "annee_scolaire": m.annee_scolaire,
             "coefficient":   m.coefficient,
             "nb_sessions":   len(sessions),
             "taux_presence": taux,
@@ -101,14 +102,15 @@ async def session_aujourd_hui(
                 Attendance.session_id == s.id
             ).all()
             sessions_today.append({
-                "session_id":  str(s.id),
-                "matiere":     m.nom,
-                "classe":      s.classe,
-                "heure_debut": str(s.heure_debut) if s.heure_debut else None,
-                "presents":    sum(1 for a in attendances if a.status == "present"),
-                "absents":     sum(1 for a in attendances if a.status == "absent"),
-                "retards":     sum(1 for a in attendances if a.status == "retard"),
-                "total":       len(attendances),
+                "session_id":    str(s.id),
+                "matiere":       m.nom,
+                "classe":        s.classe,
+                "annee_scolaire": m.annee_scolaire,
+                "heure_debut":   str(s.heure_debut) if s.heure_debut else None,
+                "presents":      sum(1 for a in attendances if a.status == "present"),
+                "absents":       sum(1 for a in attendances if a.status == "absent"),
+                "retards":       sum(1 for a in attendances if a.status == "retard"),
+                "total":         len(attendances),
             })
 
     return sessions_today
@@ -150,11 +152,12 @@ async def etudiants_absents(
                         Attendance.status == "absent"
                     ).count()
                     absents.append({
-                        "student_id": key,
-                        "nom":        student.nom,
-                        "prenom":     student.prenom,
-                        "classe":     student.classe,
-                        "absences":   total_abs,
+                        "student_id":    key,
+                        "nom":           student.nom,
+                        "prenom":        student.prenom,
+                        "classe":        student.classe,
+                        "annee_scolaire": student.annee_scolaire,
+                        "absences":      total_abs,
                     })
 
     absents.sort(key=lambda x: x["absences"], reverse=True)

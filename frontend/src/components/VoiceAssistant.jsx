@@ -23,13 +23,13 @@ const ACTION_LABELS = {
 };
 
 const ACTION_REQUIRED = {
-  create_professor: ["prenom", "nom", "email", "password"],
+  create_professor: ["prenom", "nom", "email"],
   create_matiere:   ["nom", "classe", "coefficient"],
 };
 
 const PARAM_LABELS = {
   nom: "Nom", prenom: "Prénom", email: "Email",
-  password: "Mot de passe", classe: "Classe", coefficient: "Coefficient",
+  classe: "Classe", coefficient: "Coefficient",
 };
 
 const INCOMPLETE_HINTS = {
@@ -55,12 +55,17 @@ export default function VoiceAssistant({
   const [liveTranscript,    setLiveTranscript]    = useState("");
   const [isSpeaking,        setIsSpeaking]        = useState(false);
 
-  const recognition    = useRef(null);
-  const mediaRecorder  = useRef(null);
-  const audioChunks    = useRef([]);
-  const messagesEnd    = useRef(null);
-  const usingFallback  = useRef(false);
+  const recognition     = useRef(null);
+  const mediaRecorder   = useRef(null);
+  const audioChunks     = useRef([]);
+  const messagesEnd     = useRef(null);
+  const usingFallback   = useRef(false);
   const accumulatedText = useRef("");
+  const userStopped     = useRef(false);
+  const statusRef       = useRef("idle");
+
+  // Met à jour le state React ET la ref synchrone en une seule fois
+  const setS = (s) => { statusRef.current = s; setStatus(s); };
 
   const scrollToBottom = () => {
     setTimeout(() => messagesEnd.current?.scrollIntoView({ behavior: "smooth" }), 100);
@@ -114,7 +119,7 @@ export default function VoiceAssistant({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl:  true,
+          autoGainControl:  true,  // le navigateur calibre le gain automatiquement
         }
       });
 
@@ -124,33 +129,41 @@ export default function VoiceAssistant({
         MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")  ? "audio/ogg;codecs=opus" :
                                                                    "audio/ogg";
 
-      mediaRecorder.current = new MediaRecorder(stream, { mimeType });
       audioChunks.current   = [];
-      mediaRecorder.current.ondataavailable = e => { if (e.data.size > 0) audioChunks.current.push(e.data); };
+      mediaRecorder.current = new MediaRecorder(stream, { mimeType });
+
+      mediaRecorder.current.ondataavailable = e => {
+        if (e.data.size > 0) audioChunks.current.push(e.data);
+      };
       mediaRecorder.current.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         if (audioChunks.current.length === 0) {
           setError("Aucun audio capturé — réessayez");
-          setStatus("idle");
+          setS("idle");
           return;
         }
-        // Utiliser le mimeType réel du MediaRecorder (pas la variable closure)
         const realMime = mediaRecorder.current.mimeType || mimeType;
         const blob = new Blob(audioChunks.current, { type: realMime });
+        if (blob.size < 2000) {
+          setError("Enregistrement trop court — attendez le micro 🔴 avant de parler");
+          setS("idle");
+          return;
+        }
         await transcribeWithAssemblyAI(blob);
       };
-      // Pas de timeslice → un seul bloc complet à la fin (fichier WebM valide garanti)
-      mediaRecorder.current.start();
-      setStatus("recording");
-    } catch {
-      setError("Microphone inaccessible — vérifiez les permissions du navigateur");
+
+      mediaRecorder.current.start(100);
+      setLiveTranscript(""); // micro prêt
+    } catch (e) {
+      setError("Microphone inaccessible — " + (e.message || "vérifiez les permissions"));
+      setS("idle");
     }
   };
 
   const stopAssemblyAI = () => {
     if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
       mediaRecorder.current.stop();
-      setStatus("processing");
+      setS("processing");
     }
   };
 
@@ -162,86 +175,92 @@ export default function VoiceAssistant({
         headers: { Authorization: `Bearer ${getToken()}` }
       });
       const { text, error: apiError } = res.data || {};
-      if (apiError) { setError("Erreur transcription : " + apiError); setStatus("idle"); return; }
-      if (!text)    { setError("Aucune voix détectée — parlez plus fort"); setStatus("idle"); return; }
+      if (apiError) { setError("Erreur transcription : " + apiError); setS("idle"); return; }
+      if (!text)    { setError("Aucune voix détectée — parlez plus fort"); setS("idle"); return; }
       addMessage("user", text);
       await sendToChat(text);
     } catch (err) {
       setError("Erreur — " + (err.response?.data?.error || err.message));
-      setStatus("idle");
+      setS("idle");
     }
   };
 
-  // ── SpeechRecognition continue (pas d'arrêt automatique sur silence) ────────
+  // ── SpeechRecognition (continuous) ──────────────────────────────────────────
   const startRecording = () => {
-    if (status === "recording" || status === "processing") return;
-    // Arrêter le TTS avant d'ouvrir le micro (évite que SR capte la voix de l'IA)
+    if (statusRef.current === "recording" || statusRef.current === "processing") return;
     stopSpeaking();
     setError("");
     setLiveTranscript("");
     accumulatedText.current = "";
-    usingFallback.current = false;
+    usingFallback.current   = false;
+    userStopped.current     = false;
+
+    // Status immédiat pour que le bouton ⏹ soit cliquable de suite
+    setS("recording");
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { usingFallback.current = true; startAssemblyAI(); return; }
 
     const rec = new SR();
     rec.lang            = "fr-FR";
-    rec.continuous      = true;   // ← ne s'arrête pas sur les silences
+    rec.continuous      = true;
     rec.interimResults  = true;
     rec.maxAlternatives = 1;
     recognition.current = rec;
 
-    // Status immédiat → bouton "⏹" cliquable dès le départ
-    setStatus("recording");
-
     rec.onresult = (event) => {
       let interim = "";
       for (const result of event.results) {
-        if (result.isFinal) {
-          accumulatedText.current += result[0].transcript + " ";
-        } else {
-          interim += result[0].transcript;
-        }
+        if (result.isFinal) accumulatedText.current += result[0].transcript + " ";
+        else interim += result[0].transcript;
       }
-      // Affiche tout ce qui a été dit + ce qui est en cours
       setLiveTranscript((accumulatedText.current + interim).trim());
     };
 
     rec.onerror = (event) => {
-      if (event.error === "network") { usingFallback.current = true; startAssemblyAI(); return; }
-      if (event.error === "no-speech") return; // silences normaux en mode continuous → ignorer
-      if (event.error === "not-allowed") setError("Microphone refusé — autorisez l'accès");
-      else setError("Erreur micro : " + event.error);
+      if (event.error === "network") {
+        usingFallback.current = true;
+        setLiveTranscript("⏳ Connexion micro directe...");
+        // Petit délai pour laisser SR se fermer proprement avant d'ouvrir le micro
+        setTimeout(() => startAssemblyAI(), 500);
+        return;
+      }
+      if (event.error === "no-speech" || event.error === "aborted") return;
+      if (event.error === "not-allowed") {
+        setError("Microphone refusé — autorisez l'accès dans les paramètres du navigateur");
+      } else {
+        setError("Erreur micro : " + event.error);
+      }
       setLiveTranscript("");
-      setStatus("idle");
+      setS("idle");
     };
 
-    // onend ne fire que quand on appelle rec.stop() explicitement (mode continuous)
     rec.onend = async () => {
-      // Si on a basculé sur AssemblyAI (erreur réseau), ne pas interférer
-      if (usingFallback.current) return;
+      if (usingFallback.current) return; // AssemblyAI prend le relais
       const text = accumulatedText.current.trim();
       accumulatedText.current = "";
       setLiveTranscript("");
-      if (!text) { setStatus("idle"); return; }
-      setStatus("processing");
+      if (!text) { setS("idle"); return; }
+      setS("processing");
       addMessage("user", text);
       await sendToChat(text);
     };
 
     try {
       rec.start();
-    } catch {
-      setStatus("idle");
-      setError("Impossible de démarrer le micro — réessayez");
+    } catch (e) {
+      setError("Impossible de démarrer le micro : " + e.message);
+      setS("idle");
     }
   };
 
   const stopRecording = () => {
+    userStopped.current = true;
     if (usingFallback.current) { stopAssemblyAI(); return; }
     if (recognition.current) {
-      try { recognition.current.stop(); } catch { setStatus("idle"); }
+      try { recognition.current.stop(); } catch {
+        setS("idle");
+      }
     }
   };
 
@@ -283,7 +302,7 @@ export default function VoiceAssistant({
     } catch {
       setError("Erreur réseau");
     } finally {
-      setStatus("idle");
+      setS("idle");
       scrollToBottom();
     }
   };
@@ -297,6 +316,16 @@ export default function VoiceAssistant({
         res = await axios.post(`${API_URL}/api/gestion/professeurs`, params, {
           headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" }
         });
+        const tempPwd = res?.data?.temp_password;
+        const baseMsg = res?.data?.message || `Compte créé pour ${params.prenom} ${params.nom}`;
+        const fullMsg = tempPwd
+          ? `${baseMsg}. Mot de passe temporaire : ${tempPwd}`
+          : baseMsg;
+        setMessages(prev => prev.map(m => m.id === actionId ? { ...m, status: "confirmed", tempPassword: tempPwd } : m));
+        addMessage("assistant", "✅ " + fullMsg);
+        speakText(baseMsg + (tempPwd ? `. Le mot de passe temporaire est : ${tempPwd}` : ""));
+        scrollToBottom();
+        return;
       } else if (action === "create_matiere") {
         res = await axios.post(`${API_URL}/api/gestion/matieres`, params, {
           headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" }
@@ -332,7 +361,7 @@ export default function VoiceAssistant({
     const txt = inputText.trim();
     setInputText("");
     addMessage("user", txt);
-    setStatus("processing");
+    setS("processing");
     await sendToChat(txt);
   };
 
@@ -381,6 +410,23 @@ export default function VoiceAssistant({
                 </span>
               </div>
             ))}
+          {isConfirmed && msg.tempPassword && (
+            <div style={{
+              marginTop: 10, padding: "8px 12px",
+              background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)",
+              borderRadius: 8,
+            }}>
+              <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, marginBottom: 3 }}>
+                MOT DE PASSE TEMPORAIRE
+              </div>
+              <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>
+                {msg.tempPassword}
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, marginTop: 3 }}>
+                Communiquez-le au professeur
+              </div>
+            </div>
+          )}
           {isError && msg.errorMsg && (
             <div style={{ color: "#f87171", fontSize: 12, marginTop: 4 }}>{msg.errorMsg}</div>
           )}
@@ -635,7 +681,7 @@ export default function VoiceAssistant({
               {suggestions.map((q, i) => (
                 <button key={i} onClick={() => {
                   addMessage("user", q);
-                  setStatus("processing");
+                  setS("processing");
                   sendToChat(q);
                 }} style={{
                   padding: "4px 10px",

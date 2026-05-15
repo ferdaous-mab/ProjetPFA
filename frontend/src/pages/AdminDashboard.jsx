@@ -9,7 +9,13 @@ import VoiceAssistant from "../components/VoiceAssistant";
 const API_URL = "";
 const COLORS  = ["#6366f1", "#ef4444", "#f59e0b", "#22c55e"];
 const JOURS   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
-const CLASSES = ["A", "B", "C"];
+const NIVEAUX = [
+  { label: "1ère Année",  classes: ["1A", "1B", "1C"] },
+  { label: "2ème Année",  classes: ["2A", "2B", "2C"] },
+  { label: "3ème Année",  classes: ["3A", "3B", "3C"] },
+];
+const CLASSES = NIVEAUX.flatMap(n => n.classes);
+const getNiveau = (classe) => NIVEAUX.find(n => n.classes.includes(classe))?.label || "Autre";
 
 function authHeaders() {
   const token = localStorage.getItem("token");
@@ -128,8 +134,8 @@ export default function AdminDashboard({ user, onLogout }) {
   const [formProf,  setFormProf]  = useState({ nom:"", prenom:"", email:"" });
   const [createdPassword, setCreatedPassword] = useState("");
   const [resetPasswords, setResetPasswords] = useState({});  // { prof_id: "generated_password" }
-  const [formMat,   setFormMat]   = useState({ nom:"", code:"", coefficient:"1", classe:"A", professeur_id:"" });
-  const [formEmploi,setFormEmploi]= useState({ matiere_id:"", classe:"A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
+  const [formMat,   setFormMat]   = useState({ nom:"", code:"", coefficient:"1", annee_scolaire:"2025-2026", niveau:"1ère Année", classe:"1A", professeur_id:"" });
+  const [formEmploi,setFormEmploi]= useState({ matiere_id:"", niveau:"1ère Année", classe:"1A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
   const [msg,       setMsg]       = useState("");
 
   // Modal étudiant
@@ -268,7 +274,7 @@ export default function AdminDashboard({ user, onLogout }) {
       const payload = { ...formMat, coefficient: parseFloat(formMat.coefficient) };
       await axios.post(`${API_URL}/api/gestion/matieres`, payload, authHeaders());
       showMsg("✅ Matière créée !");
-      setFormMat({ nom:"", code:"", coefficient:"1", classe:"A", professeur_id:"" });
+      setFormMat({ nom:"", code:"", coefficient:"1", annee_scolaire:"2025-2026", niveau:"1ère Année", classe:"1A", professeur_id:"" });
       loadGestion();
     } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
   };
@@ -720,7 +726,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                      {["Étudiant","Classe","Absences","Taux"].map(h => (
+                      {["Étudiant","Classe","Année scolaire","Absences","Taux"].map(h => (
                         <th key={h} style={{ padding: "10px 12px", textAlign: "left",
                           color: "rgba(255,255,255,0.4)", fontSize: 12, fontWeight: 500 }}>{h}</th>
                       ))}
@@ -733,6 +739,12 @@ export default function AdminDashboard({ user, onLogout }) {
                         <td style={{ padding: "10px 12px" }}>
                           <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
                             padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>Classe {s.classe}</span>
+                        </td>
+                        <td style={{ padding: "10px 12px" }}>
+                          <span style={{ background: "rgba(14,165,233,0.12)", color: "#0ea5e9",
+                            padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>
+                            {s.annee_scolaire || "—"}
+                          </span>
                         </td>
                         <td style={{ padding: "10px 12px", color: "#ef4444", fontWeight: 600 }}>{s.absences}</td>
                         <td style={{ padding: "10px 12px" }}>
@@ -770,12 +782,18 @@ export default function AdminDashboard({ user, onLogout }) {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: 18, flexShrink: 0 }}>⚠️</div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                       {s.prenom} {s.nom}
-                      <span style={{ marginLeft: 8, background: "rgba(99,102,241,0.15)",
+                      <span style={{ background: "rgba(99,102,241,0.15)",
                         color: "#6366f1", fontSize: 11, padding: "2px 8px", borderRadius: 6 }}>
                         Classe {s.classe}
                       </span>
+                      {s.annee_scolaire && (
+                        <span style={{ background: "rgba(14,165,233,0.12)",
+                          color: "#0ea5e9", fontSize: 11, padding: "2px 8px", borderRadius: 6 }}>
+                          {s.annee_scolaire}
+                        </span>
+                      )}
                     </div>
                     <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 4 }}>
                       {s.raisons.join(" · ")}
@@ -985,15 +1003,26 @@ export default function AdminDashboard({ user, onLogout }) {
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <Input placeholder="Nom de la matière" value={formMat.nom}
                       onChange={e => setFormMat({...formMat, nom: e.target.value})} />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
                       <Input placeholder="Code (ex: BI)" value={formMat.code}
                         onChange={e => setFormMat({...formMat, code: e.target.value})} />
                       <Input placeholder="Coefficient" type="number" value={formMat.coefficient}
                         onChange={e => setFormMat({...formMat, coefficient: e.target.value})} />
+                      <Input placeholder="Année (ex: 2025-2026)" value={formMat.annee_scolaire}
+                        onChange={e => setFormMat({...formMat, annee_scolaire: e.target.value})} />
                     </div>
+                    <Select value={formMat.niveau}
+                      onChange={e => {
+                        const nv = NIVEAUX.find(n => n.label === e.target.value);
+                        setFormMat({...formMat, niveau: e.target.value, classe: nv?.classes[0] || ""});
+                      }}>
+                      {NIVEAUX.map(n => <option key={n.label} value={n.label}>{n.label}</option>)}
+                    </Select>
                     <Select value={formMat.classe}
                       onChange={e => setFormMat({...formMat, classe: e.target.value})}>
-                      {CLASSES.map(c => <option key={c} value={c}>Classe {c}</option>)}
+                      {(NIVEAUX.find(n => n.label === formMat.niveau)?.classes || []).map(c => (
+                        <option key={c} value={c}>Classe {c}</option>
+                      ))}
                     </Select>
                     <Select value={formMat.professeur_id}
                       onChange={e => setFormMat({...formMat, professeur_id: e.target.value})}>
@@ -1008,24 +1037,47 @@ export default function AdminDashboard({ user, onLogout }) {
                 <Card>
                   <SectionTitle title={`Matières (${matieres.length})`} icon="📚" />
                   {matieres.length === 0 ? <EmptyState message="Aucune matière" /> :
-                    matieres.map((m, i) => (
-                      <div key={i} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "10px 0", borderBottom: i < matieres.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                      }}>
-                        <div>
-                          <div style={{ fontWeight: 500, fontSize: 14 }}>
-                            {m.nom}
-                            <span style={{ marginLeft: 8, color: "#6366f1", fontSize: 11 }}>Coef {m.coefficient}</span>
-                          </div>
-                          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
-                            Classe {m.classe} · {m.professeur || "Aucun prof"}
-                          </div>
+                    NIVEAUX.map(nv => {
+                      const matieresDuNiveau = matieres.filter(m => nv.classes.includes(m.classe));
+                      if (matieresDuNiveau.length === 0) return null;
+                      return (
+                        <div key={nv.label}>
+                          <div style={{
+                            fontSize: 11, fontWeight: 700, color: "#6366f1",
+                            letterSpacing: "0.06em", textTransform: "uppercase",
+                            margin: "14px 0 6px", padding: "4px 8px",
+                            background: "rgba(99,102,241,0.08)", borderRadius: 6,
+                            display: "inline-block",
+                          }}>{nv.label}</div>
+                          {matieresDuNiveau.map((m, i) => (
+                            <div key={i} style={{
+                              display: "flex", alignItems: "center", justifyContent: "space-between",
+                              padding: "10px 0",
+                              borderBottom: i < matieresDuNiveau.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                            }}>
+                              <div>
+                                <div style={{ fontWeight: 500, fontSize: 14 }}>
+                                  {m.nom}
+                                  <span style={{ marginLeft: 8, color: "#6366f1", fontSize: 11 }}>Coef {m.coefficient}</span>
+                                </div>
+                                <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
+                                  Classe {m.classe}
+                                  {m.annee_scolaire && (
+                                    <span style={{ marginLeft: 6, background: "rgba(14,165,233,0.15)",
+                                      color: "#0ea5e9", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>
+                                      {m.annee_scolaire}
+                                    </span>
+                                  )}
+                                  {" · "}{m.professeur || "Aucun prof"}
+                                </div>
+                              </div>
+                              <Btn onClick={() => deleteMat(m.id)} color="#ef4444"
+                                style={{ padding: "6px 12px", fontSize: 12 }}>Supprimer</Btn>
+                            </div>
+                          ))}
                         </div>
-                        <Btn onClick={() => deleteMat(m.id)} color="#ef4444"
-                          style={{ padding: "6px 12px", fontSize: 12 }}>Supprimer</Btn>
-                      </div>
-                    ))
+                      );
+                    })
                   }
                 </Card>
               </div>
@@ -1037,9 +1089,18 @@ export default function AdminDashboard({ user, onLogout }) {
                 <Card>
                   <SectionTitle title="Ajouter un créneau" icon="➕" />
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    <Select value={formEmploi.niveau}
+                      onChange={e => {
+                        const nv = NIVEAUX.find(n => n.label === e.target.value);
+                        setFormEmploi({...formEmploi, niveau: e.target.value, classe: nv?.classes[0] || "", matiere_id: ""});
+                      }}>
+                      {NIVEAUX.map(n => <option key={n.label} value={n.label}>{n.label}</option>)}
+                    </Select>
                     <Select value={formEmploi.classe}
-                      onChange={e => setFormEmploi({...formEmploi, classe: e.target.value})}>
-                      {CLASSES.map(c => <option key={c} value={c}>Classe {c}</option>)}
+                      onChange={e => setFormEmploi({...formEmploi, classe: e.target.value, matiere_id: ""})}>
+                      {(NIVEAUX.find(n => n.label === formEmploi.niveau)?.classes || []).map(c => (
+                        <option key={c} value={c}>Classe {c}</option>
+                      ))}
                     </Select>
                     <Select value={formEmploi.jour}
                       onChange={e => setFormEmploi({...formEmploi, jour: e.target.value})}>
@@ -1057,43 +1118,57 @@ export default function AdminDashboard({ user, onLogout }) {
                     <Input placeholder="Heure fin (10:30)" value={formEmploi.heure_fin}
                       onChange={e => setFormEmploi({...formEmploi, heure_fin: e.target.value})} />
                     <Input placeholder="Salle (ex: Salle 15)" value={formEmploi.salle}
-                      onChange={e => setFormEmploi({...formEmploi, salle: e.target.value})} />
+                      onChange={e => setFormEmploi({...formEmploi, salle: e.target.value})} style={{ gridColumn: "1 / -1" }} />
                   </div>
                   <Btn onClick={addEmploi} style={{ marginTop: 12 }}>Ajouter le créneau</Btn>
                 </Card>
-                {CLASSES.map(classe => (
-                  <Card key={classe}>
-                    <SectionTitle title={`Classe ${classe}`} icon="📅" />
-                    {!emplois[classe] || emplois[classe].length === 0
-                      ? <EmptyState message={`Aucun créneau pour la classe ${classe}`} />
-                      : <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead>
-                            <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                              {["Jour","Matière","Horaire","Salle","Action"].map(h => (
-                                <th key={h} style={{ padding: "8px 12px", textAlign: "left",
-                                  color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {emplois[classe].map((e, i) => (
-                              <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                                <td style={{ padding: "8px 12px", fontSize: 13 }}>{e.jour}</td>
-                                <td style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500 }}>{e.matiere}</td>
-                                <td style={{ padding: "8px 12px", fontSize: 12,
-                                  color: "rgba(255,255,255,0.5)" }}>{e.heure_debut} → {e.heure_fin}</td>
-                                <td style={{ padding: "8px 12px", fontSize: 12,
-                                  color: "rgba(255,255,255,0.5)" }}>{e.salle || "-"}</td>
-                                <td style={{ padding: "8px 12px" }}>
-                                  <Btn onClick={() => deleteEmploi(e.id)} color="#ef4444"
-                                    style={{ padding: "4px 10px", fontSize: 11 }}>Supprimer</Btn>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                    }
-                  </Card>
+                {NIVEAUX.map(nv => (
+                  <div key={nv.label}>
+                    <div style={{
+                      fontSize: 13, fontWeight: 700, color: "#6366f1",
+                      margin: "4px 0 12px", display: "flex", alignItems: "center", gap: 8,
+                    }}>
+                      <div style={{ flex: 1, height: 1, background: "rgba(99,102,241,0.2)" }} />
+                      {nv.label}
+                      <div style={{ flex: 1, height: 1, background: "rgba(99,102,241,0.2)" }} />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {nv.classes.map(classe => (
+                        <Card key={classe}>
+                          <SectionTitle title={`Classe ${classe}`} icon="📅" />
+                          {!emplois[classe] || emplois[classe].length === 0
+                            ? <EmptyState message={`Aucun créneau pour la classe ${classe}`} />
+                            : <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                <thead>
+                                  <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                                    {["Jour","Matière","Horaire","Salle","Action"].map(h => (
+                                      <th key={h} style={{ padding: "8px 12px", textAlign: "left",
+                                        color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {emplois[classe].map((e, i) => (
+                                    <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                                      <td style={{ padding: "8px 12px", fontSize: 13 }}>{e.jour}</td>
+                                      <td style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500 }}>{e.matiere}</td>
+                                      <td style={{ padding: "8px 12px", fontSize: 12,
+                                        color: "rgba(255,255,255,0.5)" }}>{e.heure_debut} → {e.heure_fin}</td>
+                                      <td style={{ padding: "8px 12px", fontSize: 12,
+                                        color: "rgba(255,255,255,0.5)" }}>{e.salle || "-"}</td>
+                                      <td style={{ padding: "8px 12px" }}>
+                                        <Btn onClick={() => deleteEmploi(e.id)} color="#ef4444"
+                                          style={{ padding: "4px 10px", fontSize: 11 }}>Supprimer</Btn>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                          }
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

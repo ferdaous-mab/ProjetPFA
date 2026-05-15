@@ -236,8 +236,15 @@ export default function ProfDashboard({ user, onLogout }) {
                         <span style={{ marginLeft: 8, color: "rgba(255,255,255,0.3)",
                           fontSize: 12 }}>{m.code}</span>
                       </div>
-                      <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 4 }}>
-                        Classe {m.classe} · {m.nb_sessions} séances · Coef {m.coefficient}
+                      <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 4, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                        <span>Classe {m.classe}</span>
+                        {m.annee_scolaire && (
+                          <span style={{ background: "rgba(14,165,233,0.15)", color: "#0ea5e9",
+                            fontSize: 11, padding: "1px 7px", borderRadius: 4 }}>
+                            {m.annee_scolaire}
+                          </span>
+                        )}
+                        <span>· {m.nb_sessions} séances · Coef {m.coefficient}</span>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
@@ -278,8 +285,15 @@ export default function ProfDashboard({ user, onLogout }) {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 15 }}>{s.matiere}</div>
-                      <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 3 }}>
-                        Classe {s.classe} {s.heure_debut ? `· ${s.heure_debut}` : ""}
+                      <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span>Classe {s.classe}</span>
+                        {s.annee_scolaire && (
+                          <span style={{ background: "rgba(14,165,233,0.15)", color: "#0ea5e9",
+                            fontSize: 11, padding: "1px 7px", borderRadius: 4 }}>
+                            {s.annee_scolaire}
+                          </span>
+                        )}
+                        {s.heure_debut && <span>· {s.heure_debut}</span>}
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 10 }}>
@@ -315,8 +329,14 @@ export default function ProfDashboard({ user, onLogout }) {
                 }}>
                   <div>
                     <div style={{ fontWeight: 500, fontSize: 14 }}>{s.prenom} {s.nom}</div>
-                    <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, marginTop: 2 }}>
-                      Classe {s.classe}
+                    <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, marginTop: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>Classe {s.classe}</span>
+                      {s.annee_scolaire && (
+                        <span style={{ background: "rgba(14,165,233,0.15)", color: "#0ea5e9",
+                          fontSize: 11, padding: "1px 7px", borderRadius: 4 }}>
+                          {s.annee_scolaire}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div style={{

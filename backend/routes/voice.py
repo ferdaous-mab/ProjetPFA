@@ -37,38 +37,62 @@ def generate_response(message: str, db: Session) -> str:
     alertes        = db.query(Alert).filter(Alert.is_read == False).count()
     at_risk        = get_students_at_risk(db, absence_threshold=3, grade_threshold=10.0)
 
-    if any(w in msg for w in ["présence", "presence", "taux", "global"]):
+    # Mots-clés multilingues (FR · EN · TR · AR)
+    KW = {
+        "presence":  ["présence", "presence", "taux", "global",
+                      "attendance", "devam", "حضور", "نسبة"],
+        "risk":      ["risque", "danger", "difficulté", "problème",
+                      "risk", "at risk", "riskli", "tehlike", "خطر", "في خطر"],
+        "alert":     ["alerte", "alert", "notification",
+                      "bildiri", "uyarı", "تنبيه", "إشعار"],
+        "student":   ["étudiant", "etudiants", "élève", "inscrit", "enrôlé",
+                      "student", "öğrenci", "طالب", "تلميذ"],
+        "professor": ["professeur", "prof", "enseignant",
+                      "teacher", "öğretmen", "أستاذ", "معلم"],
+        "subject":   ["matière", "matiere", "cours",
+                      "course", "subject", "ders", "مادة"],
+        "absence":   ["absent", "absence", "manqu",
+                      "absentee", "devamsız", "غياب"],
+        "grade":     ["note", "moyenne", "résultat", "grade",
+                      "score", "not", "puan", "درجة", "علامة"],
+        "hello":     ["bonjour", "salut", "hello", "bonsoir",
+                      "hi", "merhaba", "selam", "مرحبا", "السلام"],
+        "summary":   ["résumé", "resume", "overview", "bilan", "statistique",
+                      "summary", "özet", "istatistik", "ملخص", "إحصاء"],
+    }
+
+    if any(w in msg for w in KW["presence"]):
         return (f"Le taux de présence global est de {taux_global}%. "
                 f"Sur {total_att} séances enregistrées, {present} présences et {absent} absences.")
 
-    if any(w in msg for w in ["risque", "danger", "difficulté", "problème"]):
+    if any(w in msg for w in KW["risk"]):
         if len(at_risk) == 0:
             return "Aucun étudiant à risque détecté pour le moment. Tout va bien !"
         noms = ", ".join([f"{s['prenom']} {s['nom']}" for s in at_risk[:3]])
         return (f"Il y a {len(at_risk)} étudiant(s) à risque. "
                 f"Les plus concernés sont : {noms}.")
 
-    if any(w in msg for w in ["alerte", "alert", "notification"]):
+    if any(w in msg for w in KW["alert"]):
         if alertes == 0:
             return "Aucune alerte non lue pour le moment."
         return f"Il y a {alertes} alerte(s) non lue(s) en attente."
 
-    if any(w in msg for w in ["étudiant", "etudiants", "élève", "inscrit", "enrôlé"]):
+    if any(w in msg for w in KW["student"]):
         return (f"La plateforme compte {total_students} étudiant(s) au total, "
                 f"dont {enrolled} enrôlés avec reconnaissance faciale.")
 
-    if any(w in msg for w in ["professeur", "prof", "enseignant"]):
+    if any(w in msg for w in KW["professor"]):
         return f"Il y a {total_profs} professeur(s) enregistré(s) sur la plateforme."
 
-    if any(w in msg for w in ["matière", "matiere", "cours"]):
+    if any(w in msg for w in KW["subject"]):
         matieres = db.query(Matiere).count()
         return f"La plateforme compte {matieres} matière(s) enregistrée(s)."
 
-    if any(w in msg for w in ["absent", "absence", "manqu"]):
+    if any(w in msg for w in KW["absence"]):
         return (f"Il y a {absent} absence(s) enregistrée(s) au total. "
                 f"Le taux d'absence global est de {round(100 - taux_global, 1)}%.")
 
-    if any(w in msg for w in ["note", "moyenne", "résultat", "grade"]):
+    if any(w in msg for w in KW["grade"]):
         grades = db.query(Grade).count()
         if grades == 0:
             return "Aucune note enregistrée pour le moment."
@@ -76,12 +100,12 @@ def generate_response(message: str, db: Session) -> str:
         avg = db.query(func.avg(Grade.note)).scalar()
         return f"Il y a {grades} note(s) enregistrée(s). La moyenne générale est de {round(avg, 2)}/20."
 
-    if any(w in msg for w in ["bonjour", "salut", "hello", "bonsoir"]):
+    if any(w in msg for w in KW["hello"]):
         return (f"Bonjour ! Je suis votre assistant SmartCampus. "
                 f"Vous avez {total_students} étudiants, {total_profs} professeurs "
                 f"et un taux de présence de {taux_global}%.")
 
-    if any(w in msg for w in ["résumé", "resume", "overview", "bilan", "statistique"]):
+    if any(w in msg for w in KW["summary"]):
         return (f"Voici le bilan : {total_students} étudiants ({enrolled} enrôlés), "
                 f"taux de présence {taux_global}%, "
                 f"{len(at_risk)} étudiant(s) à risque, "
@@ -174,12 +198,11 @@ def find_professor_by_name(message: str, db: Session):
 
 # ── Constantes dialogue champ par champ ──────────────────────────────────────
 
-PROF_FIELDS = ["prenom", "nom", "email", "password"]
+PROF_FIELDS = ["prenom", "nom", "email"]
 PROF_QUESTIONS = {
-    "prenom":   "Quel est le prénom du professeur ?",
-    "nom":      "Quel est son nom de famille ?",
-    "email":    "Quelle est son adresse email ?",
-    "password": "Quel mot de passe souhaitez-vous lui attribuer ?",
+    "prenom": "Quel est le prénom du professeur ?",
+    "nom":    "Quel est son nom de famille ?",
+    "email":  "Quelle est son adresse email ?",
 }
 
 MATIERE_FIELDS = ["nom", "classe", "coefficient"]
@@ -227,7 +250,7 @@ def _complete_professor(params: dict) -> dict:
         "type":   "action",
         "action": "create_professor",
         "params": params,
-        "reply":  f"Parfait ! Je vais créer le compte de {params['prenom']} {params['nom']} ({params['email']}). Confirmez-vous ?"
+        "reply":  f"Je vais créer le compte de {params['prenom']} {params['nom']} ({params['email']}). Un mot de passe temporaire sera généré automatiquement. Confirmez-vous ?"
     }
 
 
@@ -499,41 +522,51 @@ def generate_response_prof(message: str, db: Session, user) -> str:
 
     absents_list.sort(key=lambda x: x[1], reverse=True)
 
-    if any(w in msg for w in ["bonjour", "salut", "hello", "bonsoir"]):
+    KW = {
+        "hello":    ["bonjour", "salut", "hello", "bonsoir", "hi", "merhaba", "selam", "مرحبا"],
+        "presence": ["présence", "presence", "taux", "attendance", "devam", "حضور"],
+        "absence":  ["absent", "absence", "manqu", "absentee", "devamsız", "غياب"],
+        "subject":  ["matière", "matiere", "cours", "enseign", "course", "ders", "مادة"],
+        "session":  ["aujourd", "session", "séance", "today", "bugün", "اليوم"],
+        "alert":    ["alerte", "alert", "notification", "uyarı", "تنبيه"],
+        "summary":  ["résumé", "resume", "bilan", "statistique", "overview", "özet", "ملخص"],
+    }
+
+    if any(w in msg for w in KW["hello"]):
         return (f"Bonjour ! Vous enseignez {nb_matieres} matière(s) avec un taux de présence "
                 f"moyen de {taux}%. {alertes} alerte(s) non lue(s).")
 
-    if any(w in msg for w in ["présence", "presence", "taux"]):
+    if any(w in msg for w in KW["presence"]):
         if nb_matieres == 0:
             return "Vous n'avez aucune matière assignée pour le moment."
         return (f"Taux de présence global dans vos cours : {taux}%. "
                 f"Sur {total_att} présences enregistrées, {present} présents et {absent} absents.")
 
-    if any(w in msg for w in ["absent", "absence", "manqu"]):
+    if any(w in msg for w in KW["absence"]):
         if not absents_list:
             return "Aucun étudiant absent dans vos cours. Excellent !"
         top = ", ".join([f"{s.prenom} {s.nom} ({n} abs.)" for s, n in absents_list[:3]])
         return (f"Il y a {len(absents_list)} étudiant(s) avec des absences dans vos cours. "
                 f"Les plus absents : {top}.")
 
-    if any(w in msg for w in ["matière", "matiere", "cours", "enseign"]):
+    if any(w in msg for w in KW["subject"]):
         if nb_matieres == 0:
             return "Aucune matière ne vous est assignée pour le moment."
         noms = ", ".join([m.nom for m in matieres])
         return f"Vous enseignez {nb_matieres} matière(s) : {noms}."
 
-    if any(w in msg for w in ["aujourd", "session", "séance"]):
+    if any(w in msg for w in KW["session"]):
         if not sessions_today:
             return "Vous n'avez aucune séance prévue aujourd'hui."
         details = ", ".join([f"{nom}" for nom, _ in sessions_today])
         return f"Vous avez {len(sessions_today)} séance(s) aujourd'hui : {details}."
 
-    if any(w in msg for w in ["alerte", "alert", "notification"]):
+    if any(w in msg for w in KW["alert"]):
         if alertes == 0:
             return "Aucune alerte non lue pour le moment."
         return f"Il y a {alertes} alerte(s) non lue(s) vous concernant."
 
-    if any(w in msg for w in ["résumé", "resume", "bilan", "statistique", "overview"]):
+    if any(w in msg for w in KW["summary"]):
         return (f"Bilan : {nb_matieres} matière(s), taux de présence {taux}%, "
                 f"{len(absents_list)} étudiant(s) avec absences, {alertes} alerte(s) non lue(s).")
 
