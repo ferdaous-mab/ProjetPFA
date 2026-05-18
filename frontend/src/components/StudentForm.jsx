@@ -6,7 +6,9 @@ const ANNEES  = ['1ère année', '2ème année', '3ème année', '4ème année',
 const API_URL = ''
 
 export default function StudentForm({ onSuccess }) {
-  const [form,    setForm]    = useState({ nom:'', prenom:'', email:'', classe:'', annee_scolaire:'', password:'', confirmPassword:'' })
+  const [form,    setForm]    = useState({
+    nom:'', prenom:'', email:'', classe:'', annee_scolaire:'', password:'', confirmPassword:''
+  })
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
 
@@ -25,17 +27,22 @@ export default function StudentForm({ onSuccess }) {
     setLoading(true)
     setError(null)
     try {
-      const formData = new FormData()
-      formData.append('nom', form.nom)
-      formData.append('prenom', form.prenom)
-      formData.append('email', form.email)
-      formData.append('classe', form.classe)
-      formData.append('annee_scolaire', form.annee_scolaire)
-
-      const res = await axios.post(`${API_URL}/api/enroll`, formData)
-      onSuccess(res.data.student_id, form.email, form.password, form.nom, form.prenom)
+      const res = await axios.post(`${API_URL}/api/enrollment/students`, {
+        nom:            form.nom,
+        prenom:         form.prenom,
+        email:          form.email,
+        classe:         form.classe,
+        annee_scolaire: form.annee_scolaire,
+      })
+      const studentId = res.data.id || res.data.student_id
+      onSuccess(studentId, form.email, form.password, form.nom, form.prenom)
     } catch (err) {
-      setError(err.response?.data?.detail || "Erreur lors de l'inscription")
+      const detail = err.response?.data?.detail
+      if (Array.isArray(detail)) {
+        setError(detail.map(e => e.msg).join(', '))
+      } else {
+        setError(typeof detail === 'string' ? detail : "Erreur lors de l'inscription")
+      }
     } finally {
       setLoading(false)
     }
@@ -155,7 +162,8 @@ export default function StudentForm({ onSuccess }) {
 
           <div style={{ marginBottom:'24px' }}>
             <label className="sf-label">Confirmer le mot de passe</label>
-            <input className="sf-input" name="confirmPassword" type="password" value={form.confirmPassword}
+            <input className="sf-input" name="confirmPassword" type="password"
+              value={form.confirmPassword}
               onChange={handleChange} required placeholder="Répétez le mot de passe" />
           </div>
 

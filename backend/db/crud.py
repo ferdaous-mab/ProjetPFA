@@ -433,5 +433,12 @@ def get_students_at_risk(db: Session, absence_threshold: int = 3,
 
 
 
+def delete_student_face(db: Session, student_id) -> bool:
+    deleted = db.query(StudentFace).filter(
+        StudentFace.student_id == student_id).delete()
+    db.commit()
+    return deleted > 0
+
+
 # À la fin de crud.py
 delete_student_images = delete_student_images_db

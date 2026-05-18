@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import VoiceAssistant from "../components/VoiceAssistant";
 
-const API_URL = "";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const COLORS  = ["#6366f1", "#ef4444", "#f59e0b", "#22c55e"];
 const JOURS   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
 const CLASSES = ["A", "B", "C"];

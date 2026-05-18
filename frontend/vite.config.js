@@ -4,14 +4,18 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 
 export default defineConfig({
   plugins: [react(), basicSsl()],
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'recharts'],
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,
-    https: true,
+    open: true,
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        secure: false,
       }
     }
   }
