@@ -1,15 +1,22 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { useBreakpoint } from "../utils/useBreakpoint";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell,
 } from "recharts";
 import VoiceAssistant from "../components/VoiceAssistant";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = "";
 const COLORS  = ["#6366f1", "#ef4444", "#f59e0b", "#22c55e"];
 const JOURS   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
-const CLASSES = ["A", "B", "C"];
+const NIVEAUX = [
+  { label: "1ère Année",  classes: ["1A", "1B", "1C"] },
+  { label: "2ème Année",  classes: ["2A", "2B", "2C"] },
+  { label: "3ème Année",  classes: ["3A", "3B", "3C"] },
+];
+const CLASSES = NIVEAUX.flatMap(n => n.classes);
+const getNiveau = (classe) => NIVEAUX.find(n => n.classes.includes(classe))?.label || "Autre";
 
 function authHeaders() {
   const token = localStorage.getItem("token");
@@ -106,6 +113,7 @@ function Btn({ onClick, children, color = "#6366f1", style = {} }) {
 }
 
 export default function AdminDashboard({ user, onLogout }) {
+  const bp = useBreakpoint();
   const [overview,    setOverview]    = useState(null);
   const [presClasse,  setPresClasse]  = useState([]);
   const [presMat,     setPresMat]     = useState([]);
@@ -125,10 +133,17 @@ export default function AdminDashboard({ user, onLogout }) {
   const [emplois,   setEmplois]   = useState({});
   const [etudiants, setEtudiants] = useState([]);
   const [gTab,      setGTab]      = useState("profs");
-  const [formProf,  setFormProf]  = useState({ nom:"", prenom:"", email:"", password:"" });
-  const [formMat,   setFormMat]   = useState({ nom:"", code:"", coefficient:"1", classe:"A", professeur_id:"" });
-  const [formEmploi,setFormEmploi]= useState({ matiere_id:"", classe:"A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
+  const [formProf,  setFormProf]  = useState({ nom:"", prenom:"", email:"" });
+  const [createdPassword, setCreatedPassword] = useState("");
+  const [resetPasswords, setResetPasswords] = useState({});  // { prof_id: "generated_password" }
+  const [formMat,   setFormMat]   = useState({ nom:"", code:"", coefficient:"1", annee_scolaire:"2025-2026", niveau:"1ère Année", classe:"1A", professeur_id:"" });
+  const [formEmploi,setFormEmploi]= useState({ matiere_id:"", niveau:"1ère Année", classe:"1A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
   const [msg,       setMsg]       = useState("");
+
+  // Modal étudiant
+  const [selectedEtudiant, setSelectedEtudiant] = useState(null);
+  const [editForm,          setEditForm]          = useState({});
+  const [editLoading,       setEditLoading]       = useState(false);
 
   useEffect(() => { loadBI(); }, []);
   useEffect(() => { if (activeTab === "gestion") loadGestion(); }, [activeTab]);
@@ -161,27 +176,56 @@ export default function AdminDashboard({ user, onLogout }) {
   };
 
   const loadGestion = async () => {
-    try {
-      const [pr, mt, em, et] = await Promise.all([
-        axios.get(`${API_URL}/api/gestion/professeurs`, authHeaders()),
-        axios.get(`${API_URL}/api/gestion/matieres`,    authHeaders()),
-        axios.get(`${API_URL}/api/gestion/emplois`,     authHeaders()),
-        axios.get(`${API_URL}/api/gestion/etudiants`,   authHeaders()),
-      ]);
-      setProfs(pr.data);
-      setMatieres(mt.data);
-      setEmplois(em.data);
-      setEtudiants(et.data);
-    } catch (err) { console.error(err); }
+    const [pr, mt, em, et] = await Promise.allSettled([
+      axios.get(`${API_URL}/api/gestion/professeurs`, authHeaders()),
+      axios.get(`${API_URL}/api/gestion/matieres`,    authHeaders()),
+      axios.get(`${API_URL}/api/gestion/emplois`,     authHeaders()),
+      axios.get(`${API_URL}/api/gestion/etudiants`,   authHeaders()),
+    ]);
+    if (pr.status === "fulfilled") setProfs(pr.value.data);
+    else console.error("Profs:", pr.reason);
+    if (mt.status === "fulfilled") setMatieres(mt.value.data);
+    else console.error("Matieres:", mt.reason);
+    if (em.status === "fulfilled") setEmplois(em.value.data);
+    else console.error("Emplois:", em.reason);
+    if (et.status === "fulfilled") setEtudiants(et.value.data);
+    else console.error("Etudiants:", et.reason);
   };
 
   const showMsg = (m) => { setMsg(m); setTimeout(() => setMsg(""), 3000); };
 
+  const openEtudiant = (s) => {
+    setSelectedEtudiant(s);
+    setEditForm({
+      nom: s.nom, prenom: s.prenom, email: s.email,
+      classe: s.classe, annee_scolaire: s.annee_scolaire || "",
+      telephone: s.telephone || "", date_naissance: s.date_naissance || "",
+      lieu_naissance: s.lieu_naissance || "", sexe: s.sexe || "",
+      adresse: s.adresse || "", ville: s.ville || "",
+      cin: s.cin || "", numero_carte: s.numero_carte || "",
+      nom_pere: s.nom_pere || "", tel_pere: s.tel_pere || "",
+      nom_mere: s.nom_mere || "", tel_mere: s.tel_mere || "",
+      email_parent: s.email_parent || "",
+    });
+  };
+
+  const saveEtudiant = async () => {
+    setEditLoading(true);
+    try {
+      await axios.put(`${API_URL}/api/gestion/etudiants/${selectedEtudiant.id}`, editForm, authHeaders());
+      showMsg("✅ Étudiant mis à jour !");
+      await loadGestion();
+      setSelectedEtudiant(prev => ({ ...prev, ...editForm }));
+    } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
+    finally { setEditLoading(false); }
+  };
+
   const addProf = async () => {
     try {
-      await axios.post(`${API_URL}/api/gestion/professeurs`, formProf, authHeaders());
+      const res = await axios.post(`${API_URL}/api/gestion/professeurs`, formProf, authHeaders());
+      setCreatedPassword(res.data.temp_password || "");
       showMsg("✅ Professeur créé !");
-      setFormProf({ nom:"", prenom:"", email:"", password:"" });
+      setFormProf({ nom:"", prenom:"", email:"" });
       loadGestion();
     } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
   };
@@ -206,6 +250,14 @@ export default function AdminDashboard({ user, onLogout }) {
     loadGestion();
   };
 
+  const resetProfPassword = async (id, nom, prenom) => {
+    if (!confirm(`Réinitialiser le mot de passe de ${prenom} ${nom} ? Le professeur devra utiliser le nouveau mot de passe.`)) return;
+    try {
+      const res = await axios.post(`${API_URL}/api/gestion/professeurs/${id}/reset-password`, {}, authHeaders());
+      setResetPasswords(prev => ({ ...prev, [id]: res.data.password }));
+    } catch { showMsg("❌ Erreur lors de la réinitialisation"); }
+  };
+
   const deactivateEtudiant = async (id) => {
     if (!confirm("Désactiver le compte de cet étudiant ?")) return;
     await axios.put(`${API_URL}/api/gestion/etudiants/${id}/deactivate`, {}, authHeaders());
@@ -224,7 +276,7 @@ export default function AdminDashboard({ user, onLogout }) {
       const payload = { ...formMat, coefficient: parseFloat(formMat.coefficient) };
       await axios.post(`${API_URL}/api/gestion/matieres`, payload, authHeaders());
       showMsg("✅ Matière créée !");
-      setFormMat({ nom:"", code:"", coefficient:"1", classe:"A", professeur_id:"" });
+      setFormMat({ nom:"", code:"", coefficient:"1", annee_scolaire:"2025-2026", niveau:"1ère Année", classe:"1A", professeur_id:"" });
       loadGestion();
     } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
   };
@@ -281,78 +333,284 @@ export default function AdminDashboard({ user, onLogout }) {
       fontFamily: "'Sora', sans-serif", color: "#fff" }}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap')"}</style>
 
+      {/* Modal Étudiant */}
+      {selectedEtudiant && (() => {
+        const s  = selectedEtudiant;
+        const ef = editForm;
+        const set = (k, v) => setEditForm(f => ({ ...f, [k]: v }));
+        const LBL = ({ children }) => (
+          <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.3)",
+            letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>{children}</div>
+        );
+        const SECTION = ({ title, icon }) => (
+          <div style={{ display: "flex", alignItems: "center", gap: 8,
+            margin: "22px 0 14px", paddingBottom: 8,
+            borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+            <span style={{ fontSize: 15 }}>{icon}</span>
+            <span style={{ fontWeight: 600, fontSize: 13, color: "rgba(255,255,255,0.7)" }}>{title}</span>
+          </div>
+        );
+        return (
+          <div onClick={() => setSelectedEtudiant(null)} style={{
+            position: "fixed", inset: 0, zIndex: 200,
+            background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: "#0b0b18", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 20, width: "100%", maxWidth: 700,
+              maxHeight: "92vh", overflowY: "auto",
+              boxShadow: "0 32px 100px rgba(0,0,0,0.7)",
+            }}>
+
+              {/* ── En-tête ── */}
+              <div style={{
+                padding: "22px 28px 18px", borderBottom: "1px solid rgba(255,255,255,0.07)",
+                display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0,
+                background: "#0b0b18", zIndex: 10,
+              }}>
+                <div style={{
+                  width: 60, height: 60, borderRadius: 14, flexShrink: 0,
+                  background: "linear-gradient(135deg,#6366f1,#a855f7)",
+                  overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26,
+                }}>
+                  {s.photo_url
+                    ? <img src={s.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                    : "🎓"}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700 }}>{s.prenom} {s.nom}</div>
+                  <div style={{ display: "flex", gap: 7, marginTop: 6, flexWrap: "wrap" }}>
+                    {[
+                      { label: `Classe ${s.classe}`, color: "#6366f1" },
+                      { label: s.annee_scolaire || "—", color: "#0ea5e9" },
+                      { label: s.is_enrolled ? "✓ Enrôlé" : "Non enrôlé",
+                        color: s.is_enrolled ? "#22c55e" : "#f59e0b" },
+                      s.has_account && { label: s.account_active ? "Compte actif" : "Compte désactivé",
+                        color: s.account_active ? "#22c55e" : "#ef4444" },
+                    ].filter(Boolean).map((b, i) => (
+                      <span key={i} style={{ background: `${b.color}20`, color: b.color,
+                        fontSize: 11, padding: "2px 9px", borderRadius: 20, fontWeight: 600 }}>{b.label}</span>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={() => setSelectedEtudiant(null)} style={{
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 8, color: "rgba(255,255,255,0.5)", cursor: "pointer",
+                  width: 32, height: 32, fontSize: 16, display: "flex",
+                  alignItems: "center", justifyContent: "center", flexShrink: 0,
+                }}>✕</button>
+              </div>
+
+              {/* ── Corps ── */}
+              <div style={{ padding: "4px 28px 28px" }}>
+
+                {/* Stats */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginTop: 20 }}>
+                  {[
+                    { label: "Taux présence", value: `${s.taux_presence || 0}%`,
+                      color: (s.taux_presence||0) >= 75 ? "#22c55e" : (s.taux_presence||0) >= 50 ? "#f59e0b" : "#ef4444" },
+                    { label: "Absences", value: s.absences || 0,
+                      color: (s.absences||0) > 5 ? "#ef4444" : (s.absences||0) > 2 ? "#f59e0b" : "#22c55e" },
+                    { label: "Moyenne générale", value: (s.moyenne||0) > 0 ? `${s.moyenne}/20` : "—",
+                      color: (s.moyenne||0) >= 14 ? "#22c55e" : (s.moyenne||0) >= 10 ? "#f59e0b" : "#ef4444" },
+                  ].map(st => (
+                    <div key={st.label} style={{ background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12,
+                      padding: "14px 12px", textAlign: "center" }}>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: st.color }}>{st.value}</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>{st.label}</div>
+                    </div>
+                  ))}
+                </div>
+                {s.date_inscription && (
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 10 }}>
+                    Inscrit le {s.date_inscription} · N° carte : {s.numero_carte || "—"} · CIN : {s.cin || "—"}
+                  </div>
+                )}
+
+                {/* ─── Infos étudiant (lecture seule pour l'admin) ─── */}
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
+                    paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span style={{ fontSize: 14 }}>👤</span>
+                    <span style={{ fontWeight: 600, fontSize: 13, color: "rgba(255,255,255,0.5)" }}>Informations étudiant</span>
+                    <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.25)",
+                      background: "rgba(255,255,255,0.05)", padding: "2px 8px",
+                      borderRadius: 20, fontWeight: 600, letterSpacing: "0.06em" }}>MODIFIABLES PAR L'ÉTUDIANT</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    {[
+                      ["Nom",              s.nom],
+                      ["Prénom",           s.prenom],
+                      ["Email",            s.email],
+                      ["Téléphone",        s.telephone],
+                      ["Adresse",          s.adresse],
+                      ["Ville",            s.ville],
+                      ["Date naissance",   s.date_naissance],
+                      ["Lieu naissance",   s.lieu_naissance],
+                      ["Sexe",             s.sexe === "M" ? "Masculin" : s.sexe === "F" ? "Féminin" : null],
+                      ["CIN",              s.cin],
+                      ["Classe",           s.classe],
+                      ["Année scolaire",   s.annee_scolaire],
+                      ["N° Carte étudiant",s.numero_carte],
+                    ].map(([label, val]) => (
+                      <div key={label}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.25)",
+                          letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
+                        <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.02)",
+                          border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8,
+                          fontSize: 12, color: val ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.18)",
+                          minHeight: 34, display: "flex", alignItems: "center" }}>
+                          {val || "—"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ─── Section parents : Admin uniquement ─── */}
+                <div style={{
+                  marginTop: 22, padding: "16px 18px",
+                  background: "rgba(245,158,11,0.05)",
+                  border: "1px solid rgba(245,158,11,0.2)",
+                  borderRadius: 12,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                    <span style={{ fontSize: 15 }}>🔒</span>
+                    <span style={{ fontWeight: 600, fontSize: 13, color: "#f59e0b" }}>
+                      Informations des parents
+                    </span>
+                    <span style={{
+                      marginLeft: "auto", fontSize: 10, fontWeight: 600,
+                      background: "rgba(245,158,11,0.15)", color: "#f59e0b",
+                      padding: "2px 8px", borderRadius: 20, letterSpacing: "0.06em",
+                    }}>ADMIN UNIQUEMENT</span>
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 6, fontWeight: 600 }}>
+                      PÈRE — NOM & PRÉNOM
+                    </div>
+                    <Input value={ef.nom_pere || ""} placeholder="Mohamed Benali" onChange={e => set("nom_pere", e.target.value)} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 6, fontWeight: 600 }}>PÈRE — TÉLÉPHONE</div>
+                      <Input value={ef.tel_pere || ""} placeholder="06 XX XX XX XX" onChange={e => set("tel_pere", e.target.value)} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 6, fontWeight: 600 }}>MÈRE — TÉLÉPHONE</div>
+                      <Input value={ef.tel_mere || ""} placeholder="06 XX XX XX XX" onChange={e => set("tel_mere", e.target.value)} />
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 6, fontWeight: 600 }}>MÈRE — NOM & PRÉNOM</div>
+                    <Input value={ef.nom_mere || ""} placeholder="Fatima Benali" onChange={e => set("nom_mere", e.target.value)} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 6, fontWeight: 600 }}>EMAIL PARENT</div>
+                    <Input value={ef.email_parent || ""} placeholder="parent@gmail.com" type="email" onChange={e => set("email_parent", e.target.value)} />
+                  </div>
+                </div>
+
+                {/* ─── Boutons ─── */}
+                <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+                  <Btn onClick={saveEtudiant} style={{ flex: 1, padding: "11px", opacity: editLoading ? 0.6 : 1 }}>
+                    {editLoading ? "Enregistrement..." : "💾 Enregistrer les modifications"}
+                  </Btn>
+                  <Btn onClick={() => setSelectedEtudiant(null)} color="rgba(255,255,255,0.06)"
+                    style={{ padding: "11px 22px", color: "rgba(255,255,255,0.5)" }}>
+                    Annuler
+                  </Btn>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Voice Assistant Modal */}
-      {showVoice && <VoiceAssistant onClose={() => setShowVoice(false)} />}
+      {showVoice && (
+        <VoiceAssistant
+          onClose={() => setShowVoice(false)}
+          chatEndpoint="/api/voice/command"
+          suggestions={[
+            "Taux de présence global ?",
+            "Ajoute prof Ahmed Benali, email a@esisa.ma, mdp Prof123",
+            "Crée la matière Maths pour classe A",
+            "Désactive le prof Benali",
+            "Étudiants à risque ?",
+            "Résumé de la plateforme",
+          ]}
+        />
+      )}
 
       {/* Header */}
-      <div style={{
-        borderBottom: "1px solid rgba(255,255,255,0.07)",
-        padding: "0 24px", display: "flex", alignItems: "center",
-        justifyContent: "space-between", height: 60,
-        position: "sticky", top: 0,
-        background: "rgba(5,5,15,0.95)", backdropFilter: "blur(10px)", zIndex: 100,
-      }}>
+      <div className="app-header">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
             background: "linear-gradient(135deg,#f59e0b,#ef4444)",
             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
           }}>⚙️</div>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>SmartCampus IA</span>
-          <span style={{
+          <span style={{ fontWeight: 700, fontSize: bp.isMobile ? 13 : 15 }}>SmartCampus IA</span>
+          <span className="hide-mobile" style={{
             background: "rgba(245,158,11,0.15)", color: "#f59e0b",
             fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
           }}>Admin</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="header-actions">
           {overview?.alertes_non_lues > 0 && (
             <div style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444",
               fontSize: 12, padding: "4px 10px", borderRadius: 20, fontWeight: 600 }}>
               🔔 {overview.alertes_non_lues}
             </div>
           )}
-          {/* Bouton Assistant IA */}
           <button onClick={() => setShowVoice(true)} style={{
-            background: "rgba(99,102,241,0.15)",
-            border: "1px solid rgba(99,102,241,0.3)",
-            borderRadius: 8, color: "#6366f1",
-            cursor: "pointer", padding: "6px 14px",
+            background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)",
+            borderRadius: 8, color: "#6366f1", cursor: "pointer",
+            padding: bp.isMobile ? "6px 10px" : "6px 14px",
             fontFamily: "Sora, sans-serif", fontSize: 12, fontWeight: 600,
-          }}>🎤 Assistant IA</button>
-          <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
+          }}>{bp.isMobile ? "🎤" : "🎤 Assistant IA"}</button>
+          <span className="header-username" style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
             {user?.prenom} {user?.nom}
           </span>
           <button onClick={onLogout} style={{
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 8, color: "rgba(255,255,255,0.6)",
-            cursor: "pointer", padding: "6px 14px",
+            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 8, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+            padding: bp.isMobile ? "6px 10px" : "6px 14px",
             fontFamily: "Sora, sans-serif", fontSize: 12,
-          }}>Déconnexion</button>
+          }}>{bp.isMobile ? "↪" : "Déconnexion"}</button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, padding: "16px 24px 0",
-        borderBottom: "1px solid rgba(255,255,255,0.07)", overflowX: "auto" }}>
+      <div className="tabs-scroll" style={{
+        padding: bp.isMobile ? "10px 12px 0" : "16px 24px 0",
+        borderBottom: "1px solid rgba(255,255,255,0.07)",
+        display: "flex", flexDirection: "row", flexWrap: "nowrap",
+        overflowX: "auto", gap: 2,
+      }}>
         {tabs.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+          <button key={tab.id} className="tab-btn" onClick={() => setActiveTab(tab.id)} style={{
             background: activeTab === tab.id ? "rgba(99,102,241,0.15)" : "transparent",
             border: "none",
             borderBottom: activeTab === tab.id ? "2px solid #6366f1" : "2px solid transparent",
             color: activeTab === tab.id ? "#6366f1" : "rgba(255,255,255,0.4)",
-            cursor: "pointer", padding: "10px 16px",
-            fontFamily: "Sora, sans-serif", fontSize: 13,
+            cursor: "pointer", padding: bp.isMobile ? "8px 10px" : "10px 16px",
+            fontFamily: "Sora, sans-serif", fontSize: bp.isMobile ? 12 : 13,
             fontWeight: activeTab === tab.id ? 600 : 400,
             borderRadius: "8px 8px 0 0",
-            display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+            display: "flex", alignItems: "center", gap: 5,
           }}>
-            {tab.icon} {tab.label}
+            {tab.icon}{!bp.isMobile && " "}{!bp.isMobile && tab.label}
+            {bp.isMobile && <span style={{ fontSize: 10, marginLeft: 2 }}>{tab.label.split(" ")[0]}</span>}
           </button>
         ))}
       </div>
 
-      <div style={{ padding: 24, maxWidth: 1200, margin: "0 auto" }}>
+      <div className="page-body">
         {loading && activeTab !== "gestion" && (
           <div style={{ textAlign: "center", padding: 60,
             color: "rgba(255,255,255,0.3)" }}>Chargement...</div>
@@ -361,7 +619,7 @@ export default function AdminDashboard({ user, onLogout }) {
         {/* Vue d'ensemble */}
         {!loading && activeTab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: bp.colsAuto, gap: bp.gap2 }}>
               <StatCard icon="🎓" label="Étudiants" color="#6366f1"
                 value={overview?.total_etudiants || 0}
                 sub={`${overview?.enrolles || 0} enrôlés`} />
@@ -375,7 +633,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <StatCard icon="⚠️" label="Alertes" color="#ef4444"
                 value={overview?.alertes_non_lues || 0} sub="non lues" />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: bp.cols2, gap: bp.gap }}>
               <Card>
                 <SectionTitle title="Présence par classe" icon="📊" />
                 {presClasse.length === 0 ? <EmptyState message="Aucune donnée" /> :
@@ -466,7 +724,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                      {["Étudiant","Classe","Absences","Taux"].map(h => (
+                      {["Étudiant","Classe","Année scolaire","Absences","Taux"].map(h => (
                         <th key={h} style={{ padding: "10px 12px", textAlign: "left",
                           color: "rgba(255,255,255,0.4)", fontSize: 12, fontWeight: 500 }}>{h}</th>
                       ))}
@@ -479,6 +737,12 @@ export default function AdminDashboard({ user, onLogout }) {
                         <td style={{ padding: "10px 12px" }}>
                           <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
                             padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>Classe {s.classe}</span>
+                        </td>
+                        <td style={{ padding: "10px 12px" }}>
+                          <span style={{ background: "rgba(14,165,233,0.12)", color: "#0ea5e9",
+                            padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>
+                            {s.annee_scolaire || "—"}
+                          </span>
                         </td>
                         <td style={{ padding: "10px 12px", color: "#ef4444", fontWeight: 600 }}>{s.absences}</td>
                         <td style={{ padding: "10px 12px" }}>
@@ -516,12 +780,18 @@ export default function AdminDashboard({ user, onLogout }) {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: 18, flexShrink: 0 }}>⚠️</div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                       {s.prenom} {s.nom}
-                      <span style={{ marginLeft: 8, background: "rgba(99,102,241,0.15)",
+                      <span style={{ background: "rgba(99,102,241,0.15)",
                         color: "#6366f1", fontSize: 11, padding: "2px 8px", borderRadius: 6 }}>
                         Classe {s.classe}
                       </span>
+                      {s.annee_scolaire && (
+                        <span style={{ background: "rgba(14,165,233,0.12)",
+                          color: "#0ea5e9", fontSize: 11, padding: "2px 8px", borderRadius: 6 }}>
+                          {s.annee_scolaire}
+                        </span>
+                      )}
                     </div>
                     <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 4 }}>
                       {s.raisons.join(" · ")}
@@ -625,9 +895,39 @@ export default function AdminDashboard({ user, onLogout }) {
                     </div>
                     <Input placeholder="Email" type="email" value={formProf.email}
                       onChange={e => setFormProf({...formProf, email: e.target.value})} />
-                    <Input placeholder="Mot de passe" type="password" value={formProf.password}
-                      onChange={e => setFormProf({...formProf, password: e.target.value})} />
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", padding: "4px 0" }}>
+                      Un mot de passe temporaire sera généré automatiquement
+                    </div>
                     <Btn onClick={addProf}>Créer le compte</Btn>
+                    {createdPassword && (
+                      <div style={{
+                        background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)",
+                        borderRadius: 10, padding: "12px 14px",
+                      }}>
+                        <div style={{ fontSize: 12, color: "#22c55e", fontWeight: 600, marginBottom: 4 }}>
+                          Mot de passe temporaire généré
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <code style={{
+                            fontSize: 15, fontWeight: 700, color: "#fff",
+                            background: "rgba(255,255,255,0.06)", padding: "4px 10px",
+                            borderRadius: 6, letterSpacing: 1, flex: 1,
+                          }}>{createdPassword}</code>
+                          <button onClick={() => { navigator.clipboard.writeText(createdPassword); }} style={{
+                            background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
+                            borderRadius: 6, color: "#a5b4fc", cursor: "pointer",
+                            padding: "4px 10px", fontSize: 11, fontFamily: "Sora, sans-serif",
+                          }}>Copier</button>
+                          <button onClick={() => setCreatedPassword("")} style={{
+                            background: "transparent", border: "none",
+                            color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 16,
+                          }}>✕</button>
+                        </div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 6 }}>
+                          Transmettez ce mot de passe au professeur. Il pourra le modifier depuis son dashboard.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </Card>
                 <Card>
@@ -638,7 +938,7 @@ export default function AdminDashboard({ user, onLogout }) {
                         display: "flex", alignItems: "center", justifyContent: "space-between",
                         padding: "12px 0", borderBottom: i < profs.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
                       }}>
-                        <div>
+                        <div style={{ flex: 1 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={{ fontWeight: 500, fontSize: 14 }}>{p.prenom} {p.nom}</span>
                             <span style={{
@@ -650,8 +950,30 @@ export default function AdminDashboard({ user, onLogout }) {
                           <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, marginTop: 2 }}>
                             {p.email} · {p.nb_matieres} matières
                           </div>
+                          {resetPasswords[p.id] && (
+                            <div style={{
+                              display: "inline-flex", alignItems: "center", gap: 8,
+                              marginTop: 6, background: "rgba(245,158,11,0.1)",
+                              border: "1px solid rgba(245,158,11,0.3)",
+                              borderRadius: 8, padding: "6px 10px",
+                            }}>
+                              <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>Nouveau mdp (affiché une seule fois) :</span>
+                              <code style={{ fontSize: 13, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>
+                                {resetPasswords[p.id]}
+                              </code>
+                              <button onClick={() => navigator.clipboard.writeText(resetPasswords[p.id])}
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "#f59e0b", fontSize: 13 }}>📋</button>
+                              <button onClick={() => setResetPasswords(prev => { const n = {...prev}; delete n[p.id]; return n; })}
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.3)", fontSize: 14 }}>✕</button>
+                            </div>
+                          )}
                         </div>
-                        <div style={{ display: "flex", gap: 6 }}>
+                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          <Btn onClick={() => resetProfPassword(p.id, p.nom, p.prenom)}
+                            color="rgba(245,158,11,0.2)"
+                            style={{ padding: "6px 12px", fontSize: 12, border: "1px solid rgba(245,158,11,0.4)", color: "#f59e0b" }}>
+                            Réinitialiser mdp
+                          </Btn>
                           {p.is_active ? (
                             <Btn onClick={() => deactivateProf(p.id)} color="#ef4444"
                               style={{ padding: "6px 12px", fontSize: 12 }}>Désactiver</Btn>
@@ -679,15 +1001,26 @@ export default function AdminDashboard({ user, onLogout }) {
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <Input placeholder="Nom de la matière" value={formMat.nom}
                       onChange={e => setFormMat({...formMat, nom: e.target.value})} />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
                       <Input placeholder="Code (ex: BI)" value={formMat.code}
                         onChange={e => setFormMat({...formMat, code: e.target.value})} />
                       <Input placeholder="Coefficient" type="number" value={formMat.coefficient}
                         onChange={e => setFormMat({...formMat, coefficient: e.target.value})} />
+                      <Input placeholder="Année (ex: 2025-2026)" value={formMat.annee_scolaire}
+                        onChange={e => setFormMat({...formMat, annee_scolaire: e.target.value})} />
                     </div>
+                    <Select value={formMat.niveau}
+                      onChange={e => {
+                        const nv = NIVEAUX.find(n => n.label === e.target.value);
+                        setFormMat({...formMat, niveau: e.target.value, classe: nv?.classes[0] || ""});
+                      }}>
+                      {NIVEAUX.map(n => <option key={n.label} value={n.label}>{n.label}</option>)}
+                    </Select>
                     <Select value={formMat.classe}
                       onChange={e => setFormMat({...formMat, classe: e.target.value})}>
-                      {CLASSES.map(c => <option key={c} value={c}>Classe {c}</option>)}
+                      {(NIVEAUX.find(n => n.label === formMat.niveau)?.classes || []).map(c => (
+                        <option key={c} value={c}>Classe {c}</option>
+                      ))}
                     </Select>
                     <Select value={formMat.professeur_id}
                       onChange={e => setFormMat({...formMat, professeur_id: e.target.value})}>
@@ -702,24 +1035,47 @@ export default function AdminDashboard({ user, onLogout }) {
                 <Card>
                   <SectionTitle title={`Matières (${matieres.length})`} icon="📚" />
                   {matieres.length === 0 ? <EmptyState message="Aucune matière" /> :
-                    matieres.map((m, i) => (
-                      <div key={i} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "10px 0", borderBottom: i < matieres.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                      }}>
-                        <div>
-                          <div style={{ fontWeight: 500, fontSize: 14 }}>
-                            {m.nom}
-                            <span style={{ marginLeft: 8, color: "#6366f1", fontSize: 11 }}>Coef {m.coefficient}</span>
-                          </div>
-                          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
-                            Classe {m.classe} · {m.professeur || "Aucun prof"}
-                          </div>
+                    NIVEAUX.map(nv => {
+                      const matieresDuNiveau = matieres.filter(m => nv.classes.includes(m.classe));
+                      if (matieresDuNiveau.length === 0) return null;
+                      return (
+                        <div key={nv.label}>
+                          <div style={{
+                            fontSize: 11, fontWeight: 700, color: "#6366f1",
+                            letterSpacing: "0.06em", textTransform: "uppercase",
+                            margin: "14px 0 6px", padding: "4px 8px",
+                            background: "rgba(99,102,241,0.08)", borderRadius: 6,
+                            display: "inline-block",
+                          }}>{nv.label}</div>
+                          {matieresDuNiveau.map((m, i) => (
+                            <div key={i} style={{
+                              display: "flex", alignItems: "center", justifyContent: "space-between",
+                              padding: "10px 0",
+                              borderBottom: i < matieresDuNiveau.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                            }}>
+                              <div>
+                                <div style={{ fontWeight: 500, fontSize: 14 }}>
+                                  {m.nom}
+                                  <span style={{ marginLeft: 8, color: "#6366f1", fontSize: 11 }}>Coef {m.coefficient}</span>
+                                </div>
+                                <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
+                                  Classe {m.classe}
+                                  {m.annee_scolaire && (
+                                    <span style={{ marginLeft: 6, background: "rgba(14,165,233,0.15)",
+                                      color: "#0ea5e9", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>
+                                      {m.annee_scolaire}
+                                    </span>
+                                  )}
+                                  {" · "}{m.professeur || "Aucun prof"}
+                                </div>
+                              </div>
+                              <Btn onClick={() => deleteMat(m.id)} color="#ef4444"
+                                style={{ padding: "6px 12px", fontSize: 12 }}>Supprimer</Btn>
+                            </div>
+                          ))}
                         </div>
-                        <Btn onClick={() => deleteMat(m.id)} color="#ef4444"
-                          style={{ padding: "6px 12px", fontSize: 12 }}>Supprimer</Btn>
-                      </div>
-                    ))
+                      );
+                    })
                   }
                 </Card>
               </div>
@@ -731,9 +1087,18 @@ export default function AdminDashboard({ user, onLogout }) {
                 <Card>
                   <SectionTitle title="Ajouter un créneau" icon="➕" />
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    <Select value={formEmploi.niveau}
+                      onChange={e => {
+                        const nv = NIVEAUX.find(n => n.label === e.target.value);
+                        setFormEmploi({...formEmploi, niveau: e.target.value, classe: nv?.classes[0] || "", matiere_id: ""});
+                      }}>
+                      {NIVEAUX.map(n => <option key={n.label} value={n.label}>{n.label}</option>)}
+                    </Select>
                     <Select value={formEmploi.classe}
-                      onChange={e => setFormEmploi({...formEmploi, classe: e.target.value})}>
-                      {CLASSES.map(c => <option key={c} value={c}>Classe {c}</option>)}
+                      onChange={e => setFormEmploi({...formEmploi, classe: e.target.value, matiere_id: ""})}>
+                      {(NIVEAUX.find(n => n.label === formEmploi.niveau)?.classes || []).map(c => (
+                        <option key={c} value={c}>Classe {c}</option>
+                      ))}
                     </Select>
                     <Select value={formEmploi.jour}
                       onChange={e => setFormEmploi({...formEmploi, jour: e.target.value})}>
@@ -751,119 +1116,228 @@ export default function AdminDashboard({ user, onLogout }) {
                     <Input placeholder="Heure fin (10:30)" value={formEmploi.heure_fin}
                       onChange={e => setFormEmploi({...formEmploi, heure_fin: e.target.value})} />
                     <Input placeholder="Salle (ex: Salle 15)" value={formEmploi.salle}
-                      onChange={e => setFormEmploi({...formEmploi, salle: e.target.value})} />
+                      onChange={e => setFormEmploi({...formEmploi, salle: e.target.value})} style={{ gridColumn: "1 / -1" }} />
                   </div>
                   <Btn onClick={addEmploi} style={{ marginTop: 12 }}>Ajouter le créneau</Btn>
                 </Card>
-                {CLASSES.map(classe => (
-                  <Card key={classe}>
-                    <SectionTitle title={`Classe ${classe}`} icon="📅" />
-                    {!emplois[classe] || emplois[classe].length === 0
-                      ? <EmptyState message={`Aucun créneau pour la classe ${classe}`} />
-                      : <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead>
-                            <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                              {["Jour","Matière","Horaire","Salle","Action"].map(h => (
-                                <th key={h} style={{ padding: "8px 12px", textAlign: "left",
-                                  color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {emplois[classe].map((e, i) => (
-                              <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                                <td style={{ padding: "8px 12px", fontSize: 13 }}>{e.jour}</td>
-                                <td style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500 }}>{e.matiere}</td>
-                                <td style={{ padding: "8px 12px", fontSize: 12,
-                                  color: "rgba(255,255,255,0.5)" }}>{e.heure_debut} → {e.heure_fin}</td>
-                                <td style={{ padding: "8px 12px", fontSize: 12,
-                                  color: "rgba(255,255,255,0.5)" }}>{e.salle || "-"}</td>
-                                <td style={{ padding: "8px 12px" }}>
-                                  <Btn onClick={() => deleteEmploi(e.id)} color="#ef4444"
-                                    style={{ padding: "4px 10px", fontSize: 11 }}>Supprimer</Btn>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                    }
-                  </Card>
+                {NIVEAUX.map(nv => (
+                  <div key={nv.label}>
+                    <div style={{
+                      fontSize: 13, fontWeight: 700, color: "#6366f1",
+                      margin: "4px 0 12px", display: "flex", alignItems: "center", gap: 8,
+                    }}>
+                      <div style={{ flex: 1, height: 1, background: "rgba(99,102,241,0.2)" }} />
+                      {nv.label}
+                      <div style={{ flex: 1, height: 1, background: "rgba(99,102,241,0.2)" }} />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {nv.classes.map(classe => (
+                        <Card key={classe}>
+                          <SectionTitle title={`Classe ${classe}`} icon="📅" />
+                          {!emplois[classe] || emplois[classe].length === 0
+                            ? <EmptyState message={`Aucun créneau pour la classe ${classe}`} />
+                            : <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                <thead>
+                                  <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                                    {["Jour","Matière","Horaire","Salle","Action"].map(h => (
+                                      <th key={h} style={{ padding: "8px 12px", textAlign: "left",
+                                        color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {emplois[classe].map((e, i) => (
+                                    <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                                      <td style={{ padding: "8px 12px", fontSize: 13 }}>{e.jour}</td>
+                                      <td style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500 }}>{e.matiere}</td>
+                                      <td style={{ padding: "8px 12px", fontSize: 12,
+                                        color: "rgba(255,255,255,0.5)" }}>{e.heure_debut} → {e.heure_fin}</td>
+                                      <td style={{ padding: "8px 12px", fontSize: 12,
+                                        color: "rgba(255,255,255,0.5)" }}>{e.salle || "-"}</td>
+                                      <td style={{ padding: "8px 12px" }}>
+                                        <Btn onClick={() => deleteEmploi(e.id)} color="#ef4444"
+                                          style={{ padding: "4px 10px", fontSize: 11 }}>Supprimer</Btn>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                          }
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
 
             {/* Étudiants */}
             {gTab === "etudiants" && (
-              <Card>
-                <SectionTitle title={`Étudiants (${etudiants.length})`} icon="🎓" />
-                {etudiants.length === 0 ? <EmptyState message="Aucun étudiant" /> :
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                        {["Photo","Étudiant","Classe","Email","Enrôlement","Compte","Actions"].map(h => (
-                          <th key={h} style={{ padding: "10px 12px", textAlign: "left",
-                            color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {etudiants.map((s, i) => (
-                        <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                          <td style={{ padding: "10px 12px" }}>
-                            <div style={{ width: 36, height: 36, borderRadius: "50%",
-                              background: "linear-gradient(135deg,#6366f1,#a855f7)",
-                              overflow: "hidden", display: "flex", alignItems: "center",
-                              justifyContent: "center", fontSize: 16 }}>
-                              {s.photo_url
-                                ? <img src={s.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                                : "🎓"}
-                            </div>
-                          </td>
-                          <td style={{ padding: "10px 12px", fontSize: 14 }}>{s.prenom} {s.nom}</td>
-                          <td style={{ padding: "10px 12px" }}>
-                            <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
-                              padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>Classe {s.classe}</span>
-                          </td>
-                          <td style={{ padding: "10px 12px", fontSize: 12,
-                            color: "rgba(255,255,255,0.4)" }}>{s.email}</td>
-                          <td style={{ padding: "10px 12px" }}>
-                            <span style={{
-                              background: s.is_enrolled ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)",
-                              color: s.is_enrolled ? "#22c55e" : "#f59e0b",
-                              padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                            }}>{s.is_enrolled ? "Enrôlé" : "Non enrôlé"}</span>
-                          </td>
-                          <td style={{ padding: "10px 12px" }}>
-                            {s.has_account ? (
-                              <span style={{
-                                fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 600,
-                                background: s.account_active ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
-                                color: s.account_active ? "#22c55e" : "#ef4444",
-                              }}>{s.account_active ? "Actif" : "Désactivé"}</span>
-                            ) : (
-                              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>Aucun compte</span>
-                            )}
-                          </td>
-                          <td style={{ padding: "10px 12px" }}>
-                            <div style={{ display: "flex", gap: 6 }}>
-                              {s.has_account && s.account_active && (
-                                <Btn onClick={() => deactivateEtudiant(s.id)} color="#ef4444"
-                                  style={{ padding: "5px 10px", fontSize: 11 }}>Désactiver</Btn>
-                              )}
-                              {s.has_account && !s.account_active && (
-                                <Btn onClick={() => reactivateEtudiant(s.id)} color="#22c55e"
-                                  style={{ padding: "5px 10px", fontSize: 11 }}>Réactiver</Btn>
-                              )}
-                              <Btn onClick={() => deleteEtudiant(s.id)} color="#7f1d1d"
-                                style={{ padding: "5px 10px", fontSize: 11 }}>Supprimer</Btn>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                }
-              </Card>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Statistiques globales */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+                  <StatCard icon="🎓" label="Total étudiants" color="#6366f1"
+                    value={etudiants.length} />
+                  <StatCard icon="✅" label="Enrôlés" color="#22c55e"
+                    value={etudiants.filter(e => e.is_enrolled).length} />
+                  <StatCard icon="👤" label="Avec compte" color="#0ea5e9"
+                    value={etudiants.filter(e => e.has_account).length} />
+                  <StatCard icon="📊" label="Présence moy." color="#f59e0b"
+                    value={etudiants.length
+                      ? `${Math.round(etudiants.reduce((s, e) => s + (e.taux_presence || 0), 0) / etudiants.length)}%`
+                      : "—"} />
+                  <StatCard icon="📝" label="Moyenne gén." color="#a855f7"
+                    value={etudiants.length
+                      ? `${(etudiants.reduce((s, e) => s + (e.moyenne || 0), 0) / etudiants.length).toFixed(1)}/20`
+                      : "—"} />
+                </div>
+
+                <Card>
+                  <SectionTitle title={`Étudiants (${etudiants.length})`} icon="🎓" />
+                  {etudiants.length === 0 ? <EmptyState message="Aucun étudiant" /> :
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                            {["Photo","Étudiant","Classe / Année","Contact","Enrôlement","Présence","Absences","Moyenne","Compte","Actions"].map(h => (
+                              <th key={h} style={{ padding: "10px 10px", textAlign: "left",
+                                color: "rgba(255,255,255,0.4)", fontSize: 11, whiteSpace: "nowrap" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {etudiants.map((s, i) => (
+                            <tr key={i} onClick={() => openEtudiant(s)} style={{
+                              borderBottom: "1px solid rgba(255,255,255,0.04)",
+                              cursor: "pointer", transition: "background 0.15s",
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(99,102,241,0.06)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                              {/* Photo */}
+                              <td style={{ padding: "10px 10px" }}>
+                                <div style={{ width: 38, height: 38, borderRadius: "50%",
+                                  background: "linear-gradient(135deg,#6366f1,#a855f7)",
+                                  overflow: "hidden", display: "flex", alignItems: "center",
+                                  justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
+                                  {s.photo_url
+                                    ? <img src={s.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                                    : "🎓"}
+                                </div>
+                              </td>
+
+                              {/* Nom + date inscription */}
+                              <td style={{ padding: "10px 10px" }}>
+                                <div style={{ fontWeight: 600, fontSize: 13 }}>{s.prenom} {s.nom}</div>
+                                {s.date_inscription && (
+                                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
+                                    Inscrit le {s.date_inscription}
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Classe + Année */}
+                              <td style={{ padding: "10px 10px" }}>
+                                <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
+                                  padding: "2px 8px", borderRadius: 6, fontSize: 12, fontWeight: 600 }}>
+                                  {s.classe}
+                                </span>
+                                {s.annee_scolaire && (
+                                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 3 }}>
+                                    {s.annee_scolaire}
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Email */}
+                              <td style={{ padding: "10px 10px", fontSize: 12,
+                                color: "rgba(255,255,255,0.5)", maxWidth: 180, overflow: "hidden",
+                                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {s.email}
+                              </td>
+
+                              {/* Enrôlement */}
+                              <td style={{ padding: "10px 10px" }}>
+                                <span style={{
+                                  background: s.is_enrolled ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)",
+                                  color: s.is_enrolled ? "#22c55e" : "#f59e0b",
+                                  padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                }}>{s.is_enrolled ? "✓ Enrôlé" : "Non enrôlé"}</span>
+                              </td>
+
+                              {/* Taux présence */}
+                              <td style={{ padding: "10px 10px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <div style={{ width: 50, height: 5, background: "rgba(255,255,255,0.08)", borderRadius: 3 }}>
+                                    <div style={{
+                                      width: `${s.taux_presence || 0}%`, height: "100%", borderRadius: 3,
+                                      background: (s.taux_presence || 0) >= 75 ? "#22c55e"
+                                        : (s.taux_presence || 0) >= 50 ? "#f59e0b" : "#ef4444",
+                                    }} />
+                                  </div>
+                                  <span style={{ fontSize: 12, fontWeight: 600,
+                                    color: (s.taux_presence || 0) >= 75 ? "#22c55e"
+                                      : (s.taux_presence || 0) >= 50 ? "#f59e0b" : "#ef4444" }}>
+                                    {s.taux_presence || 0}%
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* Absences */}
+                              <td style={{ padding: "10px 10px" }}>
+                                <span style={{
+                                  fontWeight: 700, fontSize: 14,
+                                  color: (s.absences || 0) > 5 ? "#ef4444"
+                                    : (s.absences || 0) > 2 ? "#f59e0b" : "rgba(255,255,255,0.6)",
+                                }}>{s.absences || 0}</span>
+                              </td>
+
+                              {/* Moyenne */}
+                              <td style={{ padding: "10px 10px" }}>
+                                <span style={{
+                                  fontWeight: 700, fontSize: 14,
+                                  color: (s.moyenne || 0) >= 14 ? "#22c55e"
+                                    : (s.moyenne || 0) >= 10 ? "#f59e0b" : "#ef4444",
+                                }}>
+                                  {s.moyenne > 0 ? `${s.moyenne}/20` : "—"}
+                                </span>
+                              </td>
+
+                              {/* Compte */}
+                              <td style={{ padding: "10px 10px" }}>
+                                {s.has_account ? (
+                                  <span style={{
+                                    fontSize: 11, padding: "3px 8px", borderRadius: 6, fontWeight: 600,
+                                    background: s.account_active ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                                    color: s.account_active ? "#22c55e" : "#ef4444",
+                                  }}>{s.account_active ? "Actif" : "Désactivé"}</span>
+                                ) : (
+                                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>—</span>
+                                )}
+                              </td>
+
+                              {/* Actions */}
+                              <td style={{ padding: "10px 10px" }} onClick={e => e.stopPropagation()}>
+                                <div style={{ display: "flex", gap: 5 }}>
+                                  {s.has_account && s.account_active && (
+                                    <Btn onClick={() => deactivateEtudiant(s.id)} color="#ef4444"
+                                      style={{ padding: "4px 9px", fontSize: 11 }}>Désactiver</Btn>
+                                  )}
+                                  {s.has_account && !s.account_active && (
+                                    <Btn onClick={() => reactivateEtudiant(s.id)} color="#22c55e"
+                                      style={{ padding: "4px 9px", fontSize: 11 }}>Réactiver</Btn>
+                                  )}
+                                  <Btn onClick={() => deleteEtudiant(s.id)} color="#7f1d1d"
+                                    style={{ padding: "4px 9px", fontSize: 11 }}>Supprimer</Btn>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  }
+                </Card>
+              </div>
             )}
           </div>
         )}

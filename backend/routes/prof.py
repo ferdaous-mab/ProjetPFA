@@ -1,13 +1,39 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from auth.dependencies import admin_or_prof, get_current_user, get_db
+from auth.jwt_handler import hash_password, verify_password
 from db.models import (
     Student, Attendance, Grade, Matiere,
-    Session as SessionModel, Alert
+    Session as SessionModel, Alert, User
 )
 from datetime import datetime, timezone, date
 
 router = APIRouter()
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password:     str
+
+
+@router.put("/prof/change-password")
+async def change_password(
+    req:  ChangePasswordRequest,
+    db:   Session = Depends(get_db),
+    user           = Depends(get_current_user)
+):
+    """Permet au professeur de changer son mot de passe."""
+    if user.role not in ("professeur", "admin"):
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    if not verify_password(req.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect")
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit contenir au moins 6 caractères")
+    db_user = db.query(User).filter(User.id == user.id).first()
+    db_user.password_hash = hash_password(req.new_password)
+    db.commit()
+    return {"success": True, "message": "Mot de passe modifié avec succès"}
 
 
 @router.get("/prof/overview")
@@ -42,6 +68,7 @@ async def prof_overview(
             "nom":           m.nom,
             "code":          m.code,
             "classe":        m.classe,
+            "annee_scolaire": m.annee_scolaire,
             "coefficient":   m.coefficient,
             "nb_sessions":   len(sessions),
             "taux_presence": taux,
@@ -75,14 +102,15 @@ async def session_aujourd_hui(
                 Attendance.session_id == s.id
             ).all()
             sessions_today.append({
-                "session_id":  str(s.id),
-                "matiere":     m.nom,
-                "classe":      s.classe,
-                "heure_debut": str(s.heure_debut) if s.heure_debut else None,
-                "presents":    sum(1 for a in attendances if a.status == "present"),
-                "absents":     sum(1 for a in attendances if a.status == "absent"),
-                "retards":     sum(1 for a in attendances if a.status == "retard"),
-                "total":       len(attendances),
+                "session_id":    str(s.id),
+                "matiere":       m.nom,
+                "classe":        s.classe,
+                "annee_scolaire": m.annee_scolaire,
+                "heure_debut":   str(s.heure_debut) if s.heure_debut else None,
+                "presents":      sum(1 for a in attendances if a.status == "present"),
+                "absents":       sum(1 for a in attendances if a.status == "absent"),
+                "retards":       sum(1 for a in attendances if a.status == "retard"),
+                "total":         len(attendances),
             })
 
     return sessions_today
@@ -124,11 +152,12 @@ async def etudiants_absents(
                         Attendance.status == "absent"
                     ).count()
                     absents.append({
-                        "student_id": key,
-                        "nom":        student.nom,
-                        "prenom":     student.prenom,
-                        "classe":     student.classe,
-                        "absences":   total_abs,
+                        "student_id":    key,
+                        "nom":           student.nom,
+                        "prenom":        student.prenom,
+                        "classe":        student.classe,
+                        "annee_scolaire": student.annee_scolaire,
+                        "absences":      total_abs,
                     })
 
     absents.sort(key=lambda x: x["absences"], reverse=True)

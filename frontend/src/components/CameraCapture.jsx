@@ -188,11 +188,16 @@ export default function CameraCapture({ studentId, onComplete }) {
         else if (reason.includes("floue") || reason.includes("éclairage")) setStatusKey("LOW_QUAL")
         else if (reason.includes("Visage") || reason.includes("détecté"))  setStatusKey("NO_FACE")
         else                                                                setStatusKey("BAD_POSE")
-        // Pour haut/bas : si le visage n'est pas détecté, encourager à revenir plus près
+        // Pour haut/bas : donner une instruction plus précise sur l'inclinaison requise
         const isVertical = curAng.id === "haut" || curAng.id === "bas"
-        const msg = isVertical && reason.includes("détecté")
-          ? "Restez dans l'ovale et inclinez doucement"
-          : reason || curAng.instruction
+        let msg = reason || curAng.instruction
+        if (isVertical && (reason.includes("Levez") || reason.includes("Baissez") || reason.includes("tête"))) {
+          msg = curAng.id === "haut"
+            ? "Levez le menton vers le haut — attendez la validation ✓"
+            : "Baissez le menton vers le bas — attendez la validation ✓"
+        } else if (isVertical && reason.includes("détecté")) {
+          msg = "Restez dans l'ovale et inclinez doucement"
+        }
         setStatusMsg(msg)
         return
       }

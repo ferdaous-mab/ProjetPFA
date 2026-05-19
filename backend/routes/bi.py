@@ -51,7 +51,7 @@ async def presence_par_classe(
     _=Depends(admin_only)
 ):
     """Taux de présence moyen par classe — pour graphique barres."""
-    classes = ["A", "B", "C", "D"]
+    classes = ["1A", "1B", "1C", "2A", "2B", "2C", "3A", "3B", "3C"]
     result  = []
 
     for classe in classes:
@@ -59,22 +59,20 @@ async def presence_par_classe(
         if not students:
             continue
 
-        total_present = 0
-        total_att     = 0
-        for s in students:
-            att     = db.query(Attendance).filter(Attendance.student_id == s.id).count()
-            present = db.query(Attendance).filter(
-                Attendance.student_id == s.id,
-                Attendance.status == "present"
-            ).count()
-            total_att     += att
-            total_present += present
+        student_ids   = [s.id for s in students]
+        total_att     = db.query(Attendance).filter(
+            Attendance.student_id.in_(student_ids)
+        ).count()
+        total_present = db.query(Attendance).filter(
+            Attendance.student_id.in_(student_ids),
+            Attendance.status == "present"
+        ).count()
 
         taux = round((total_present / total_att * 100), 1) if total_att > 0 else 0
         result.append({
-            "classe":         classe,
-            "taux_presence":  taux,
-            "nb_etudiants":   len(students),
+            "classe":        classe,
+            "taux_presence": taux,
+            "nb_etudiants":  len(students),
         })
 
     return result
@@ -200,12 +198,13 @@ async def top_absences(
         taux  = round((absences / total * 100), 1) if total > 0 else 0
 
         data.append({
-            "student_id": str(s.id),
-            "nom":        s.nom,
-            "prenom":     s.prenom,
-            "classe":     s.classe,
-            "absences":   absences,
-            "taux_absence": taux,
+            "student_id":    str(s.id),
+            "nom":           s.nom,
+            "prenom":        s.prenom,
+            "classe":        s.classe,
+            "annee_scolaire": s.annee_scolaire,
+            "absences":      absences,
+            "taux_absence":  taux,
         })
 
     data.sort(key=lambda x: x["absences"], reverse=True)

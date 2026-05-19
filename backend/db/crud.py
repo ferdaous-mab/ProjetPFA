@@ -81,12 +81,19 @@ def update_student_face(db: Session, student_id, embedding,
                         det_score: float) -> StudentFace | None:
     face = get_student_face(db, student_id)
     if face:
-        emb          = embedding.tolist() if hasattr(embedding, "tolist") else embedding
+        emb            = embedding.tolist() if hasattr(embedding, "tolist") else embedding
         face.embedding = emb
         face.det_score = det_score
         db.commit()
         db.refresh(face)
     return face
+
+
+def delete_student_face(db: Session, student_id) -> bool:
+    deleted = db.query(StudentFace).filter(
+        StudentFace.student_id == student_id).delete()
+    db.commit()
+    return deleted > 0
 
 
 # ─── STUDENT FACES TEMP ──────────────────────────────────────────────────────
@@ -421,24 +428,18 @@ def get_students_at_risk(db: Session, absence_threshold: int = 3,
             reasons.append(f"moyenne {average}/20")
         if reasons:
             at_risk.append({
-                "student_id": str(student.id),
-                "nom":        student.nom,
-                "prenom":     student.prenom,
-                "classe":     student.classe,
-                "absences":   absences,
-                "moyenne":    average,
-                "raisons":    reasons,
+                "student_id":     str(student.id),
+                "nom":            student.nom,
+                "prenom":         student.prenom,
+                "classe":         student.classe,
+                "annee_scolaire": student.annee_scolaire,
+                "absences":       absences,
+                "moyenne":        average,
+                "raisons":        reasons,
             })
     return at_risk
 
 
-
-def delete_student_face(db: Session, student_id) -> bool:
-    deleted = db.query(StudentFace).filter(
-        StudentFace.student_id == student_id).delete()
-    db.commit()
-    return deleted > 0
-
-
-# À la fin de crud.py
+# ─── ALIAS DE COMPATIBILITÉ ──────────────────────────────────────────────────
+# Pour éviter de casser le code existant qui importe `delete_student_images`
 delete_student_images = delete_student_images_db

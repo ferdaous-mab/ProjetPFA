@@ -27,9 +27,10 @@ MAX_MOVE_RATIO       = 0.18 # mouvement max tolere (ratio de la taille du visage
 CONFIDENCE_GOOD      = 0.75
 CONFIDENCE_MEDIUM    = 0.55
 
-# Seuils relatifs pour haut/bas (mesures en delta par rapport au pitch frontal calibré)
-DELTA_PITCH_HAUT = 0.09   # pitch doit AUGMENTER de 0.09 vs frontal
-DELTA_PITCH_BAS  = 0.07   # pitch doit DIMINUER  de 0.07 vs frontal
+# Seuils relatifs pour haut/bas (pitch = (nose_y - eye_mid_y) / eye_dist)
+# Frontal : ~0.6-0.8.  Haut (regarde plafond) : pitch DIMINUE.  Bas (regarde sol) : pitch AUGMENTE.
+DELTA_PITCH_HAUT = 0.10   # pitch doit DIMINUER de 0.10 sous le frontal calibré
+DELTA_PITCH_BAS  = 0.09   # pitch doit AUGMENTER de 0.09 au-dessus du frontal calibré
 
 _sessions: dict[str, dict] = {}
 _detector = None
@@ -152,11 +153,9 @@ def _pose_matches_angle(yaw: float | None, pitch: float | None,
     """
     Vérifie que la pose correspond à l'angle demandé.
 
-    face / gauche / droite : vérification stricte (yaw fiable pour SCRFD).
-    haut / bas             : vérification douce — SCRFD perd les keypoints sur
-                             les grandes inclinaisons de pitch ; on vérifie
-                             seulement que le visage n'est pas tourné latéralement,
-                             laissant l'instruction guider l'utilisateur.
+    face / gauche / droite : vérification par yaw (fiable pour SCRFD).
+    haut / bas             : vérifie yaw (pas de rotation latérale) + pitch relatif
+                             au frontal calibré. pitch diminue pour haut, augmente pour bas.
     """
     if yaw is None:
         return True
@@ -174,17 +173,30 @@ def _pose_matches_angle(yaw: float | None, pitch: float | None,
     elif angle_id == "gauche":
         result = dw > 0.13
 
-    elif angle_id in ("haut", "bas"):
-        # Vérification légère : pas de rotation latérale (ne pas confondre avec gauche/droite)
-        # Le pitch n'est pas vérifié car SCRFD est peu fiable aux grandes inclinaisons.
-        result = abs(dw) < 0.35
+    elif angle_id == "haut":
+        # pitch DIMINUE quand on regarde en haut (nez se rapproche des yeux en image)
+        if pitch is None:
+            result = abs(dw) < 0.30
+        else:
+            cp = calib_pitch if calib_pitch is not None else 0.70
+            result = abs(dw) < 0.30 and pitch < (cp - DELTA_PITCH_HAUT)
+
+    elif angle_id == "bas":
+        # pitch AUGMENTE quand on regarde en bas (nez s'éloigne des yeux en image)
+        if pitch is None:
+            result = abs(dw) < 0.30
+        else:
+            cp = calib_pitch if calib_pitch is not None else 0.70
+            result = abs(dw) < 0.30 and pitch > (cp + DELTA_PITCH_BAS)
 
     else:
         result = True
 
+    cp_log = calib_pitch if calib_pitch is not None else 0.70
     logger.info(
         f"[pose] angle={angle_id} yaw={yaw:.3f} pitch={p:.3f} "
-        f"calib_p={calib_pitch} Δyaw={dw:.3f} → ok={result}"
+        f"calib_p={cp_log:.3f} Δyaw={dw:.3f} "
+        f"thresh_haut<{cp_log - DELTA_PITCH_HAUT:.3f} thresh_bas>{cp_log + DELTA_PITCH_BAS:.3f} → ok={result}"
     )
     return result
 

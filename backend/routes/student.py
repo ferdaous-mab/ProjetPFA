@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional
 from auth.dependencies import get_current_user, get_db
-from db.models import Attendance, Grade, Matiere, Alert, StudentImage
+from db.models import Attendance, Grade, Matiere, Alert, StudentImage, Student
 from db.crud import (
     get_student_primary_image, get_absence_count,
     get_attendance_rate, get_average_by_student,
@@ -9,6 +11,15 @@ from db.crud import (
 )
 
 router = APIRouter()
+
+
+class StudentBenignUpdate(BaseModel):
+    email:     Optional[str] = None
+    telephone: Optional[str] = None
+    adresse:   Optional[str] = None
+    ville:     Optional[str] = None
+
+
 
 
 @router.get("/student/profile")
@@ -26,6 +37,8 @@ async def student_profile(
     taux_presence = get_attendance_rate(db, sid)
     moyenne       = get_average_by_student(db, sid)
 
+    student = db.query(Student).filter(Student.id == user.student_id).first()
+
     return {
         "id":            str(user.id),
         "nom":           user.nom,
@@ -36,8 +49,45 @@ async def student_profile(
             "absences":      absences,
             "taux_presence": taux_presence,
             "moyenne":       moyenne,
-        }
+        },
+        # Infos personnelles éditables par l'étudiant
+        "telephone":      student.telephone     if student else None,
+        "adresse":        student.adresse       if student else None,
+        "ville":          student.ville         if student else None,
+        "date_naissance": str(student.date_naissance) if student and student.date_naissance else None,
+        "lieu_naissance": student.lieu_naissance if student else None,
+        "sexe":           student.sexe          if student else None,
+        "cin":            student.cin           if student else None,
+        "numero_carte":   student.numero_carte  if student else None,
+        "classe":         student.classe        if student else None,
+        "annee_scolaire": student.annee_scolaire if student else None,
     }
+
+
+
+@router.put("/student/profile")
+async def update_student_benign(
+    req: StudentBenignUpdate,
+    db: Session = Depends(get_db),
+    user        = Depends(get_current_user)
+):
+    """L'étudiant peut modifier uniquement email, téléphone, adresse et ville."""
+    if user.role != "etudiant" or not user.student_id:
+        raise HTTPException(status_code=403, detail="Accès réservé aux étudiants")
+
+    student = db.query(Student).filter(Student.id == user.student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Profil introuvable")
+
+    if req.email:
+        student.email = req.email
+        user.email    = req.email
+    if req.telephone is not None: student.telephone = req.telephone
+    if req.adresse   is not None: student.adresse   = req.adresse
+    if req.ville     is not None: student.ville      = req.ville
+
+    db.commit()
+    return {"success": True, "message": "Informations mises à jour"}
 
 
 @router.get("/student/absences")

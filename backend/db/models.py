@@ -25,6 +25,27 @@ class Student(Base):
     is_enrolled    = Column(Boolean, default=False)
     created_at     = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    # Informations personnelles
+    telephone      = Column(String(20),  nullable=True)
+    date_naissance = Column(Date,        nullable=True)
+    lieu_naissance = Column(String(100), nullable=True)
+    sexe           = Column(String(1),   nullable=True)   # M / F
+    adresse        = Column(String(200), nullable=True)
+    ville          = Column(String(100), nullable=True)
+    cin            = Column(String(20),  nullable=True)   # Carte d'identité nationale
+    numero_carte   = Column(String(30),  nullable=True)   # Numéro carte étudiant
+
+    # Informations du père
+    nom_pere        = Column(String(100), nullable=True)
+    tel_pere        = Column(String(20),  nullable=True)
+
+    # Informations de la mère
+    nom_mere        = Column(String(100), nullable=True)
+    tel_mere        = Column(String(20),  nullable=True)
+
+    # Contact parent général
+    email_parent    = Column(String(100), nullable=True)
+
     # Relations
     faces       = relationship("StudentFace",     back_populates="student", cascade="all, delete")
     faces_temp  = relationship("StudentFaceTemp", back_populates="student", cascade="all, delete")
@@ -191,6 +212,18 @@ class Grade(Base):
 
     student = relationship("Student", back_populates="grades")
     matiere = relationship("Matiere", back_populates="grades")
+
+
+class PasswordResetToken(Base):
+    """Tokens de réinitialisation de mot de passe (usage unique, expire en 15 min)."""
+    __tablename__ = "password_reset_tokens"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id    = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token      = Column(String(64), unique=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used       = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class Alert(Base):

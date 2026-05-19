@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { useBreakpoint } from "../utils/useBreakpoint";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = "";
 
 function authHeaders() {
   const token = localStorage.getItem("token");
@@ -29,15 +30,53 @@ function EmptyState({ message }) {
   );
 }
 
+function InfoRow({ label, value }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.3)",
+        letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
+      <div style={{
+        padding: "10px 14px", background: "rgba(255,255,255,0.02)",
+        border: "1px solid rgba(255,255,255,0.05)", borderRadius: 10,
+        fontSize: 13, color: value ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.18)",
+        minHeight: 40, display: "flex", alignItems: "center",
+      }}>{value || "—"}</div>
+    </div>
+  );
+}
+
+function EditField({ label, value, onChange, type = "text" }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: "#a5b4fc",
+        letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</div>
+      <input type={type} value={value} onChange={onChange}
+        style={{
+          width: "100%", padding: "10px 14px", boxSizing: "border-box",
+          background: "rgba(99,102,241,0.07)",
+          border: "1px solid rgba(99,102,241,0.3)",
+          borderRadius: 10, color: "#fff", fontSize: 13,
+          fontFamily: "Sora, sans-serif", outline: "none",
+        }} />
+    </div>
+  );
+}
+
 export default function StudentDashboard({ user, onLogout }) {
+  const bp = useBreakpoint();
   const [profile,  setProfile]  = useState(null);
   const [absences, setAbsences] = useState([]);
   const [notes,    setNotes]    = useState(null);
   const [alertes,  setAlertes]  = useState([]);
-  const [activeTab,setActiveTab]= useState("profile");
-  const [loading,  setLoading]  = useState(true);
+  const [activeTab,  setActiveTab]  = useState("profile");
+  const [loading,    setLoading]    = useState(true);
+  const [editForm,   setEditForm]   = useState({ email:"", telephone:"", adresse:"", ville:"" });
+  const [saving,     setSaving]     = useState(false);
+  const [saveMsg,    setSaveMsg]    = useState("");
+
 
   useEffect(() => { loadAll(); }, []);
+
 
   const loadAll = async () => {
     setLoading(true);
@@ -52,6 +91,12 @@ export default function StudentDashboard({ user, onLogout }) {
       setAbsences(ab.data);
       setNotes(nt.data);
       setAlertes(al.data);
+      setEditForm({
+        email:     pr.data.email     || "",
+        telephone: pr.data.telephone || "",
+        adresse:   pr.data.adresse   || "",
+        ville:     pr.data.ville     || "",
+      });
     } catch (err) {
       console.error("Erreur chargement étudiant:", err);
     } finally {
@@ -59,11 +104,26 @@ export default function StudentDashboard({ user, onLogout }) {
     }
   };
 
+  const saveProfile = async () => {
+    setSaving(true);
+    try {
+      await axios.put(`${API_URL}/api/student/profile`, editForm, authHeaders());
+      setSaveMsg("ok");
+      loadAll();
+    } catch (e) {
+      setSaveMsg("err:" + (e.response?.data?.detail || "Erreur"));
+    } finally {
+      setSaving(false);
+      setTimeout(() => setSaveMsg(""), 3500);
+    }
+  };
+
   const tabs = [
-    { id: "profile",  label: "Mon profil", icon: "👤" },
-    { id: "absences", label: "Absences",   icon: "📅" },
-    { id: "notes",    label: "Notes",      icon: "📝" },
-    { id: "alertes",  label: "Alertes",    icon: "🔔" },
+    { id: "profile",  label: "Mon profil",  icon: "👤" },
+    { id: "edit",     label: "Mes infos",   icon: "✏️" },
+    { id: "absences", label: "Absences",    icon: "📅" },
+    { id: "notes",    label: "Notes",       icon: "📝" },
+    { id: "alertes",  label: "Alertes",     icon: "🔔" },
   ];
 
   const statusColor = s =>
@@ -79,63 +139,56 @@ export default function StudentDashboard({ user, onLogout }) {
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap')"}</style>
 
       {/* Header */}
-      <div style={{
-        borderBottom: "1px solid rgba(255,255,255,0.07)",
-        padding: "0 24px", display: "flex", alignItems: "center",
-        justifyContent: "space-between", height: 60,
-        position: "sticky", top: 0,
-        background: "rgba(5,5,15,0.95)", backdropFilter: "blur(10px)", zIndex: 100,
-      }}>
+      <div className="app-header">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
             background: "linear-gradient(135deg,#6366f1,#a855f7)",
             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
           }}>🎓</div>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>SmartCampus IA</span>
-          <span style={{
+          <span style={{ fontWeight: 700, fontSize: bp.isMobile ? 13 : 15 }}>SmartCampus IA</span>
+          <span className="hide-mobile" style={{
             background: "rgba(99,102,241,0.15)", color: "#6366f1",
             fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
           }}>Étudiant</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
+        <div className="header-actions">
+          <span className="header-username" style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
             {user?.prenom} {user?.nom}
           </span>
           <button onClick={onLogout} style={{
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 8, color: "rgba(255,255,255,0.6)",
-            cursor: "pointer", padding: "6px 14px",
+            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 8, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+            padding: bp.isMobile ? "6px 10px" : "6px 14px",
             fontFamily: "Sora, sans-serif", fontSize: 12,
-          }}>Déconnexion</button>
+          }}>{bp.isMobile ? "↪" : "Déconnexion"}</button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{
-        display: "flex", gap: 4, padding: "16px 24px 0",
+      <div className="tabs-scroll" style={{
+        padding: bp.isMobile ? "10px 12px 0" : "16px 24px 0",
         borderBottom: "1px solid rgba(255,255,255,0.07)",
       }}>
         {tabs.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+          <button key={tab.id} className="tab-btn" onClick={() => setActiveTab(tab.id)} style={{
             background: activeTab === tab.id ? "rgba(99,102,241,0.15)" : "transparent",
             border: "none",
             borderBottom: activeTab === tab.id ? "2px solid #6366f1" : "2px solid transparent",
             color: activeTab === tab.id ? "#6366f1" : "rgba(255,255,255,0.4)",
-            cursor: "pointer", padding: "10px 16px",
-            fontFamily: "Sora, sans-serif", fontSize: 13,
+            cursor: "pointer", padding: bp.isMobile ? "8px 10px" : "10px 16px",
+            fontFamily: "Sora, sans-serif", fontSize: bp.isMobile ? 12 : 13,
             fontWeight: activeTab === tab.id ? 600 : 400,
             borderRadius: "8px 8px 0 0",
-            display: "flex", alignItems: "center", gap: 6,
+            display: "flex", alignItems: "center", gap: 5,
           }}>
-            {tab.icon} {tab.label}
+            {tab.icon} {!bp.isMobile && tab.label}
           </button>
         ))}
       </div>
 
       {/* Contenu */}
-      <div style={{ padding: 24, maxWidth: 800, margin: "0 auto" }}>
+      <div className="page-body" style={{ maxWidth: 800 }}>
         {loading && (
           <div style={{ textAlign: "center", padding: 60,
             color: "rgba(255,255,255,0.3)" }}>Chargement...</div>
@@ -169,8 +222,7 @@ export default function StudentDashboard({ user, onLogout }) {
             </Card>
 
             {/* Stats */}
-            <div style={{ display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: bp.cols3, gap: bp.gap2 }}>
               {[
                 { label: "Absences",      value: profile.stats.absences,      color: "#ef4444", icon: "❌" },
                 { label: "Taux présence", value: `${profile.stats.taux_presence}%`, color: "#22c55e", icon: "✅" },
@@ -205,6 +257,82 @@ export default function StudentDashboard({ user, onLogout }) {
                 </p>
               )}
             </Card>
+          </div>
+        )}
+
+        {/* Mes infos */}
+        {!loading && activeTab === "edit" && profile && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+            {/* ── Informations en lecture seule ── */}
+            <Card>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                <span style={{ fontWeight: 600, fontSize: 14, color: "rgba(255,255,255,0.6)" }}>👤 Identité & scolarité</span>
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.25)",
+                  background: "rgba(255,255,255,0.05)", padding: "2px 8px",
+                  borderRadius: 20, fontWeight: 600, letterSpacing: "0.06em" }}>LECTURE SEULE</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: bp.cols2, gap: 10 }}>
+                <InfoRow label="Nom"               value={profile.nom} />
+                <InfoRow label="Prénom"            value={profile.prenom} />
+                <InfoRow label="Date de naissance" value={profile.date_naissance} />
+                <InfoRow label="Lieu de naissance" value={profile.lieu_naissance} />
+                <InfoRow label="Sexe"              value={profile.sexe === "M" ? "Masculin" : profile.sexe === "F" ? "Féminin" : null} />
+                <InfoRow label="CIN"               value={profile.cin} />
+                <InfoRow label="Classe"            value={profile.classe} />
+                <InfoRow label="Année scolaire"    value={profile.annee_scolaire} />
+                <InfoRow label="N° Carte étudiant" value={profile.numero_carte} />
+              </div>
+            </Card>
+
+            {/* ── Informations modifiables ── */}
+            <Card>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                <span style={{ fontWeight: 600, fontSize: 14, color: "#a5b4fc" }}>✏️ Mes coordonnées</span>
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "#6366f1",
+                  background: "rgba(99,102,241,0.15)", padding: "2px 8px",
+                  borderRadius: 20, fontWeight: 600, letterSpacing: "0.06em" }}>MODIFIABLE</span>
+              </div>
+
+              {saveMsg && (
+                <div style={{
+                  marginBottom: 14, padding: "10px 14px", borderRadius: 9, fontSize: 13,
+                  background: saveMsg === "ok" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+                  border: `1px solid ${saveMsg === "ok" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                  color: saveMsg === "ok" ? "#22c55e" : "#ef4444",
+                }}>
+                  {saveMsg === "ok" ? "✅ Coordonnées mises à jour !" : saveMsg.replace("err:", "")}
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: bp.cols2, gap: 12, marginBottom: 14 }}>
+                <EditField label="Email" type="email" value={editForm.email}
+                  onChange={e => setEditForm(f => ({...f, email: e.target.value}))} />
+                <EditField label="Téléphone" value={editForm.telephone}
+                  onChange={e => setEditForm(f => ({...f, telephone: e.target.value}))} />
+                <EditField label="Ville" value={editForm.ville}
+                  onChange={e => setEditForm(f => ({...f, ville: e.target.value}))} />
+                <EditField label="Adresse" value={editForm.adresse}
+                  onChange={e => setEditForm(f => ({...f, adresse: e.target.value}))} />
+              </div>
+
+              <button onClick={saveProfile} disabled={saving} style={{
+                width: "100%", padding: "11px", border: "none", borderRadius: 10,
+                background: "linear-gradient(135deg,#6366f1,#a855f7)",
+                color: "#fff", fontFamily: "Sora, sans-serif",
+                fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}>
+                {saving ? "Enregistrement..." : "💾 Enregistrer mes coordonnées"}
+              </button>
+            </Card>
+
+            <div style={{ padding: "10px 14px", background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(255,255,255,0.05)", borderRadius: 10,
+              fontSize: 11, color: "rgba(255,255,255,0.25)", lineHeight: 1.7 }}>
+              Les informations grisées sont gérées par l'administration. Pour toute correction,
+              contactez un administrateur.
+            </div>
           </div>
         )}
 
