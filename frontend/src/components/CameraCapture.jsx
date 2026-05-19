@@ -3,9 +3,9 @@ import axios from "axios"
 
 const API_URL            = ""
 const CAPTURES_PER_ANGLE  = 5
-const CAPTURE_DELAY_MS    = 80    // délai entre captures (après réponse backend)
-const ANGLE_TIMEOUT_MS    = 15000 // après 15s bloqué → bouton "Passer"
-const MIN_TO_SKIP         = 1     // captures minimum pour skiper un angle
+const CAPTURE_DELAY_MS    = 80
+const ANGLE_TIMEOUT_MS    = 15000
+const MIN_TO_SKIP         = 1
 
 const ANGLES = [
   { id: "face",   label: "Face",   arrow: null, instruction: "Regardez droit devant",       color: "#6366f1" },
@@ -17,16 +17,22 @@ const ANGLES = [
 
 const TOTAL_CAPTURES = CAPTURES_PER_ANGLE * ANGLES.length  // 25
 
-// ── Couleurs selon le statut ───────────────────────────────────────────────────
+// Progress ring geometry
+const RING_SIZE = 290
+const STROKE    = 6
+const RADIUS    = (RING_SIZE / 2) - STROKE
+const CIRC      = 2 * Math.PI * RADIUS
+
+// Status ring colors (quality details stay hidden from user)
 const ST = {
-  INIT:     { border: "#334155", text: "#94a3b8",  label: "Initialisation…" },
-  WAIT:     { border: "#6366f1", text: "#a5b4fc",  label: "Prêt…" },
-  GOOD:     { border: "#10b981", text: "#34d399",  label: "Bonne position ✓" },
-  BAD_POSE: { border: "#f59e0b", text: "#fbbf24",  label: "Mauvais angle" },
-  NO_FACE:  { border: "#ef4444", text: "#f87171",  label: "Visage non détecté" },
-  UNSTABLE: { border: "#f97316", text: "#fb923c",  label: "Stabilisez la tête" },
-  LOW_QUAL: { border: "#dc2626", text: "#fca5a5",  label: "Qualité insuffisante" },
-  DONE:     { border: "#10b981", text: "#34d399",  label: "Enrôlement terminé !" },
+  INIT:     { ring: "rgba(255,255,255,0.08)", glow: "transparent"    },
+  WAIT:     { ring: "#6366f1",                glow: "#6366f130"       },
+  GOOD:     { ring: "#10b981",                glow: "#10b98135"       },
+  BAD_POSE: { ring: "#6366f1",                glow: "#6366f130"       },
+  NO_FACE:  { ring: "#ef4444",                glow: "#ef444430"       },
+  UNSTABLE: { ring: "#f97316",                glow: "#f9731630"       },
+  LOW_QUAL: { ring: "#f97316",                glow: "#f9731630"       },
+  DONE:     { ring: "#10b981",                glow: "#10b98140"       },
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -38,7 +44,7 @@ export default function CameraCapture({ studentId, onComplete }) {
   const runningRef     = useRef(false)
   const angleIdxRef    = useRef(0)
   const countsRef      = useRef({})
-  const angleStartRef  = useRef(Date.now())  // timestamp début angle courant
+  const angleStartRef  = useRef(Date.now())
 
   const [phase,        setPhase]      = useState("INIT")
   const [countdown,    setCountdown]  = useState(3)
@@ -49,7 +55,7 @@ export default function CameraCapture({ studentId, onComplete }) {
   const [quality,      setQuality]    = useState({ sharpness: 0, brightness: 0, stability: 100 })
   const [error,        setError]      = useState("")
   const [flashAngle,   setFlashAngle] = useState(false)
-  const [timeoutReady, setTimeoutReady] = useState(false)  // bouton "Passer" visible
+  const [timeoutReady, setTimeoutReady] = useState(false)
 
   const angle     = ANGLES[angleIdx]
   const totalDone = Object.values(captures).reduce((a, b) => a + b, 0)
@@ -57,12 +63,14 @@ export default function CameraCapture({ studentId, onComplete }) {
   const angleDone = captures[angle?.id] || 0
   const st        = ST[statusKey] || ST.WAIT
 
+  // Ring offset: 0% → full gap, 100% → no gap
+  const ringOffset = CIRC - (progress / 100) * CIRC
+
   // ── 1. Init caméra + session puis countdown ───────────────────────────────
   useEffect(() => {
     let active = true
 
     const init = async () => {
-      // Caméra
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
@@ -74,7 +82,6 @@ export default function CameraCapture({ studentId, onComplete }) {
         return
       }
 
-      // Session backend
       try {
         const res = await axios.post(`${API_URL}/api/enrollment/start`, { student_id: studentId })
         if (!active) {
@@ -88,7 +95,6 @@ export default function CameraCapture({ studentId, onComplete }) {
         return
       }
 
-      // Countdown 3…2…1
       setPhase("COUNTDOWN")
       for (let i = 3; i >= 1; i--) {
         if (!active) return
@@ -112,11 +118,10 @@ export default function CameraCapture({ studentId, onComplete }) {
     }
   }, [studentId])
 
-  // ── 2. Boucle de capture (démarre quand phase = RUNNING) ─────────────────
+  // ── 2. Boucle de capture ──────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== "RUNNING") return
     runningRef.current = true
-
     const loop = async () => {
       while (runningRef.current) {
         await captureOne()
@@ -124,11 +129,10 @@ export default function CameraCapture({ studentId, onComplete }) {
       }
     }
     loop()
-
     return () => { runningRef.current = false }
   }, [phase])
 
-  // ── Reset timer + flash quand l'angle change ─────────────────────────────
+  // ── Flash + reset timer sur changement d'angle ────────────────────────────
   useEffect(() => {
     angleStartRef.current = Date.now()
     setTimeoutReady(false)
@@ -137,7 +141,7 @@ export default function CameraCapture({ studentId, onComplete }) {
     return () => clearTimeout(t)
   }, [angleIdx])
 
-  // ── Timer "Passer" : si bloqué > ANGLE_TIMEOUT_MS sans atteindre 5 captures ─
+  // ── Timer "Passer" ────────────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== "RUNNING") return
     const id = setInterval(() => {
@@ -173,7 +177,7 @@ export default function CameraCapture({ studentId, onComplete }) {
         angle:      curAng.id,
       })
 
-      // Barres de qualité
+      // Qualité trackée silencieusement (non affichée)
       if (data.sharpness_pct !== undefined) {
         setQuality({
           sharpness:  data.sharpness_pct  ?? 0,
@@ -188,7 +192,6 @@ export default function CameraCapture({ studentId, onComplete }) {
         else if (reason.includes("floue") || reason.includes("éclairage")) setStatusKey("LOW_QUAL")
         else if (reason.includes("Visage") || reason.includes("détecté"))  setStatusKey("NO_FACE")
         else                                                                setStatusKey("BAD_POSE")
-        // Pour haut/bas : donner une instruction plus précise sur l'inclinaison requise
         const isVertical = curAng.id === "haut" || curAng.id === "bas"
         let msg = reason || curAng.instruction
         if (isVertical && (reason.includes("Levez") || reason.includes("Baissez") || reason.includes("tête"))) {
@@ -202,7 +205,6 @@ export default function CameraCapture({ studentId, onComplete }) {
         return
       }
 
-      // ✓ capture acceptée
       setStatusKey("GOOD")
       setStatusMsg("✓")
 
@@ -218,7 +220,6 @@ export default function CameraCapture({ studentId, onComplete }) {
           setStatusKey("BAD_POSE")
           setStatusMsg(ANGLES[nextIdx].instruction)
         } else {
-          // Tous les angles complétés → finalisation automatique
           runningRef.current = false
           await finalize()
         }
@@ -266,348 +267,296 @@ export default function CameraCapture({ studentId, onComplete }) {
   // ── Écran d'erreur ────────────────────────────────────────────────────────
   if (error) return (
     <div style={{
-      minHeight: "100vh", background: "#020617",
+      minHeight: "100vh", background: "#000",
       display: "flex", alignItems: "center", justifyContent: "center",
-      fontFamily: '"Inter",system-ui,sans-serif', padding: 24,
+      fontFamily: '"-apple-system","SF Pro Display","Inter",system-ui,sans-serif',
+      padding: 24,
     }}>
       <div style={{
-        maxWidth: 380, width: "100%", textAlign: "center",
-        background: "#0f172a", border: "1px solid rgba(239,68,68,0.25)",
-        borderRadius: 20, padding: "40px 32px",
+        maxWidth: 340, width: "100%", textAlign: "center",
+        background: "rgba(255,255,255,0.05)",
+        border: "1px solid rgba(239,68,68,0.3)",
+        borderRadius: 24, padding: "40px 28px",
+        backdropFilter: "blur(20px)",
       }}>
         <div style={{ fontSize: 44, marginBottom: 16 }}>⚠️</div>
-        <h3 style={{ color: "#f1f5f9", margin: "0 0 12px", fontSize: 18, fontWeight: 600 }}>Erreur</h3>
-        <p style={{ color: "#94a3b8", fontSize: 14, lineHeight: 1.6, margin: 0 }}>{error}</p>
+        <h3 style={{ color: "#fff", margin: "0 0 10px", fontSize: 18, fontWeight: 600 }}>Erreur</h3>
+        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, lineHeight: 1.6, margin: 0 }}>{error}</p>
       </div>
     </div>
   )
+
+  // Arrow directional animation selector
+  const arrowAnim = {
+    "←": "arrowLeft 1.2s ease-in-out infinite",
+    "→": "arrowRight 1.2s ease-in-out infinite",
+    "↑": "arrowUp 1.2s ease-in-out infinite",
+    "↓": "arrowDown 1.2s ease-in-out infinite",
+  }
 
   // ── Rendu principal ───────────────────────────────────────────────────────
   return (
     <div style={{
-      minHeight: "100vh", background: "#020617",
-      fontFamily: '"Inter",system-ui,sans-serif', color: "#f1f5f9",
-      display: "flex", flexDirection: "column",
-      maxWidth: 480, margin: "0 auto",
+      minHeight: "100vh",
+      background: "#000",
+      fontFamily: '"-apple-system","SF Pro Display","Inter",system-ui,sans-serif',
+      color: "#fff",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "52px 28px 44px",
+      maxWidth: 480,
+      margin: "0 auto",
+      boxSizing: "border-box",
     }}>
       <style>{`
-        @keyframes pulseRing {
-          0%,100% { transform:scale(1);    opacity:0.9 }
-          50%      { transform:scale(1.03); opacity:1   }
-        }
-        @keyframes fadeSlide {
-          from { opacity:0; transform:translateY(-8px) }
-          to   { opacity:1; transform:translateY(0)    }
-        }
-        @keyframes blink {
-          0%,100% { opacity:1 }
-          50%     { opacity:0.25 }
-        }
-        @keyframes arrowPulse {
-          0%,100% { transform:scale(1);    opacity:0.7 }
-          50%      { transform:scale(1.15); opacity:1   }
-        }
-        @keyframes checkPop {
-          0%   { transform:scale(0.5); opacity:0 }
-          60%  { transform:scale(1.2); opacity:1 }
-          100% { transform:scale(1);   opacity:1 }
-        }
+        @keyframes arrowLeft  { 0%,100%{transform:translateX(0)}  50%{transform:translateX(-12px)} }
+        @keyframes arrowRight { 0%,100%{transform:translateX(0)}  50%{transform:translateX(12px)}  }
+        @keyframes arrowUp    { 0%,100%{transform:translateY(0)}  50%{transform:translateY(-12px)} }
+        @keyframes arrowDown  { 0%,100%{transform:translateY(0)}  50%{transform:translateY(12px)}  }
+        @keyframes countPop   { 0%{transform:scale(0.7);opacity:0} 60%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
+        @keyframes checkPop   { 0%{transform:scale(0.4);opacity:0} 60%{transform:scale(1.25);opacity:1} 100%{transform:scale(1)} }
+        @keyframes scanPulse  { 0%,100%{opacity:0.7} 50%{opacity:1} }
+        @keyframes fadeIn     { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes dotPulse   { 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
       `}</style>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div style={{
-        padding: "12px 18px", display: "flex", alignItems: "center",
-        justifyContent: "space-between",
-        borderBottom: "1px solid rgba(255,255,255,0.05)",
-        background: "rgba(2,6,23,0.95)", backdropFilter: "blur(12px)",
-        position: "sticky", top: 0, zIndex: 10,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: 8,
-            background: `linear-gradient(135deg,${angle?.color || "#6366f1"},#818cf8)`,
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
-          }}>🎓</div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>SmartCampus IA</div>
-            <div style={{ fontSize: 10, color: "#475569" }}>Enrôlement facial</div>
-          </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 30, fontWeight: 700, letterSpacing: -0.8, color: "#fff" }}>
+          Face ID
         </div>
-        <div style={{
-          background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)",
-          borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600, color: "#a5b4fc",
-        }}>
-          {phase === "FINALIZING" ? "Finalisation…" : `Angle ${Math.min(angleIdx + 1, ANGLES.length)} / ${ANGLES.length}`}
+        <div style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", marginTop: 4, fontWeight: 400 }}>
+          {phase === "FINALIZING"
+            ? "Finalisation…"
+            : phase === "COUNTDOWN"
+            ? "Positionnez votre visage"
+            : phase === "RUNNING"
+            ? `Étape ${Math.min(angleIdx + 1, ANGLES.length)} / ${ANGLES.length}`
+            : "Initialisation…"
+          }
         </div>
       </div>
 
-      {/* ── Vue caméra ──────────────────────────────────────────────────────── */}
-      <div style={{
-        position: "relative", margin: "12px 12px 0",
-        borderRadius: 18, overflow: "hidden",
-        aspectRatio: "4/3", background: "#0f172a", flexShrink: 0,
-        boxShadow: `0 0 0 2px ${st.border}60, 0 0 24px ${st.border}20`,
-        transition: "box-shadow 0.35s ease",
-      }}>
-        <video ref={videoRef} autoPlay playsInline muted style={{
-          width: "100%", height: "100%", objectFit: "cover",
-          transform: "scaleX(-1)", display: "block",
-        }} />
-        <canvas ref={canvasRef} style={{ display: "none" }} />
+      {/* ── Cercle principal ────────────────────────────────────────────────── */}
+      <div style={{ position: "relative", width: RING_SIZE, height: RING_SIZE, flexShrink: 0 }}>
 
-        {/* Ovale guide + masque */}
-        <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-             viewBox="0 0 100 75" preserveAspectRatio="none">
-          <defs>
-            <mask id="oval-mask">
-              <rect width="100" height="75" fill="white" />
-              <ellipse cx="50" cy="36" rx="25" ry="31" fill="black" />
-            </mask>
-          </defs>
-          <rect width="100" height="75" fill="rgba(2,6,23,0.50)" mask="url(#oval-mask)" />
-          <ellipse cx="50" cy="36" rx="25" ry="31"
-            fill="none" stroke={st.border} strokeWidth="0.7"
-            style={{
-              transition: "stroke 0.35s",
-              animation: statusKey === "GOOD" ? "pulseRing 0.9s ease-in-out infinite" : "none",
-            }}
+        {/* SVG progress ring */}
+        <svg
+          width={RING_SIZE}
+          height={RING_SIZE}
+          style={{
+            position: "absolute", inset: 0, zIndex: 2,
+            transform: "rotate(-90deg)",
+            filter: progress > 0 ? `drop-shadow(0 0 8px ${st.ring})` : "none",
+            transition: "filter 0.4s ease",
+          }}
+        >
+          {/* Track (fond de l'anneau) */}
+          <circle
+            cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RADIUS}
+            fill="none"
+            stroke="rgba(255,255,255,0.07)"
+            strokeWidth={STROKE}
+          />
+          {/* Arc de progression */}
+          <circle
+            cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RADIUS}
+            fill="none"
+            stroke={st.ring}
+            strokeWidth={STROKE}
+            strokeLinecap="round"
+            strokeDasharray={CIRC}
+            strokeDashoffset={ringOffset}
+            style={{ transition: "stroke-dashoffset 0.45s cubic-bezier(.4,0,.2,1), stroke 0.4s ease" }}
           />
         </svg>
 
-        {/* ── Countdown overlay ────────────────────────────────────────── */}
-        {phase === "COUNTDOWN" && (
-          <div style={{
-            position: "absolute", inset: 0,
-            display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center",
-            background: "rgba(2,6,23,0.7)", backdropFilter: "blur(4px)",
-          }}>
-            <div style={{
-              fontSize: 72, fontWeight: 800, color: "#6366f1",
-              animation: "blink 1s step-start infinite",
-              lineHeight: 1,
-            }}>{countdown}</div>
-            <div style={{ fontSize: 14, color: "#94a3b8", marginTop: 12 }}>
-              Positionnez votre visage dans l'ovale
-            </div>
-          </div>
-        )}
+        {/* Vidéo circulaire */}
+        <div style={{
+          position: "absolute",
+          top: STROKE + 6, left: STROKE + 6,
+          right: STROKE + 6, bottom: STROKE + 6,
+          borderRadius: "50%",
+          overflow: "hidden",
+          background: "#111",
+          zIndex: 1,
+        }}>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            style={{
+              width: "100%", height: "100%",
+              objectFit: "cover",
+              transform: "scaleX(-1)",
+              display: "block",
+            }}
+          />
+          <canvas ref={canvasRef} style={{ display: "none" }} />
+        </div>
 
-        {/* ── Overlay finalisation ─────────────────────────────────────── */}
-        {phase === "FINALIZING" && (
-          <div style={{
-            position: "absolute", inset: 0,
-            display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center",
-            background: "rgba(2,6,23,0.85)", backdropFilter: "blur(6px)",
-          }}>
-            <div style={{
-              fontSize: 56, animation: "checkPop 0.5s ease",
-              marginBottom: 12,
-            }}>✅</div>
-            <div style={{ fontSize: 15, color: "#34d399", fontWeight: 600 }}>
-              Enregistrement en cours…
-            </div>
-          </div>
-        )}
-
-        {/* ── Grande flèche de direction ───────────────────────────────── */}
+        {/* ── Flèche de direction (uniquement le symbole, pas de texte) ─── */}
         {phase === "RUNNING" && angle?.arrow && (
           <div style={{
-            position: "absolute", inset: 0,
+            position: "absolute", inset: 0, zIndex: 3,
             display: "flex", alignItems: "center", justifyContent: "center",
             pointerEvents: "none",
-            animation: flashAngle ? "arrowPulse 0.4s ease 2" : "arrowPulse 2s ease-in-out infinite",
           }}>
             <div style={{
-              fontSize: 64, lineHeight: 1,
-              color: st.border,
-              textShadow: `0 0 20px ${st.border}`,
-              opacity: statusKey === "GOOD" ? 0.3 : 0.85,
-              transition: "opacity 0.3s",
-            }}>{angle.arrow}</div>
-          </div>
-        )}
-
-        {/* ── Statut (bas de la caméra) ────────────────────────────────── */}
-        {phase === "RUNNING" && (
-          <div style={{
-            position: "absolute", bottom: 0, left: 0, right: 0,
-            padding: "8px 14px 10px",
-            background: "linear-gradient(transparent, rgba(2,6,23,0.92))",
-          }}>
-            {/* Barres qualité */}
-            <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-              <QualBar label="Netteté"   value={quality.sharpness}  color="#34d399" />
-              <QualBar label="Lumière"   value={quality.brightness} color="#60a5fa" />
-              <QualBar label="Stabilité" value={quality.stability}  color="#f59e0b" />
-            </div>
-            {/* Message statut */}
-            <div style={{
-              textAlign: "center", fontSize: 12, fontWeight: 600,
-              color: st.text,
-              animation: "fadeSlide 0.2s ease",
+              fontSize: 86,
+              lineHeight: 1,
+              color: "rgba(255,255,255,0.92)",
+              textShadow: `0 0 28px ${st.ring}, 0 0 60px ${st.ring}80`,
+              animation: arrowAnim[angle.arrow] || "none",
+              opacity: statusKey === "GOOD" ? 0.15 : 0.9,
+              transition: "opacity 0.35s ease",
+              userSelect: "none",
             }}>
-              {statusMsg || st.label}
+              {angle.arrow}
             </div>
           </div>
         )}
-      </div>
 
-      {/* ── Instruction angle actuel ─────────────────────────────────────────── */}
-      {phase === "RUNNING" && angle && (
-        <div style={{
-          margin: "10px 12px 0",
-          background: "rgba(15,23,42,0.8)", border: `1px solid ${angle.color}30`,
-          borderLeft: `3px solid ${angle.color}`,
-          borderRadius: 12, padding: "12px 16px",
-          display: "flex", alignItems: "center", gap: 14,
-          animation: flashAngle ? "fadeSlide 0.3s ease" : "none",
-        }}>
-          {/* Icône direction */}
-          <div style={{
-            width: 44, height: 44, borderRadius: 11,
-            background: `${angle.color}20`, border: `1px solid ${angle.color}40`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: angle.arrow ? 26 : 18, flexShrink: 0,
-            color: angle.color,
-          }}>
-            {angle.arrow || "●"}
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 3 }}>
-              {angle.instruction}
-            </div>
-            {/* Mini progress bar captures */}
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              {Array.from({ length: CAPTURES_PER_ANGLE }).map((_, i) => (
-                <div key={i} style={{
-                  height: 5, flex: 1, borderRadius: 3,
-                  background: i < angleDone ? angle.color : "rgba(255,255,255,0.08)",
-                  transition: "background 0.25s",
-                }} />
-              ))}
-              <span style={{ fontSize: 10, color: "#64748b", marginLeft: 4, minWidth: 28 }}>
-                {angleDone}/{CAPTURES_PER_ANGLE}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Bouton "Passer" si bloqué trop longtemps ────────────────────────── */}
-      {timeoutReady && phase === "RUNNING" && (
-        <div style={{
-          margin: "8px 12px 0", padding: "10px 14px",
-          background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)",
-          borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "space-between",
-          animation: "fadeSlide 0.3s ease",
-        }}>
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#fbbf24" }}>
-              Difficile à détecter ?
-            </div>
-            <div style={{ fontSize: 10, color: "#78716c", marginTop: 2 }}>
-              {angleDone > 0 ? `${angleDone} capture(s) enregistrée(s)` : "Angle optionnel"}
-            </div>
-          </div>
-          <button onClick={skipAngle} style={{
-            padding: "7px 14px", border: "1px solid rgba(245,158,11,0.4)",
-            borderRadius: 8, background: "rgba(245,158,11,0.12)",
-            color: "#fbbf24", fontSize: 12, fontWeight: 600, cursor: "pointer",
-          }}>
-            Passer →
-          </button>
-        </div>
-      )}
-
-      {/* ── Progression globale ──────────────────────────────────────────────── */}
-      <div style={{
-        margin: "10px 12px 0",
-        background: "rgba(15,23,42,0.6)", borderRadius: 12, padding: "10px 14px",
-      }}>
-        <div style={{
-          display: "flex", justifyContent: "space-between",
-          fontSize: 11, color: "#475569", marginBottom: 7, fontWeight: 500,
-        }}>
-          <span>Progression globale</span>
-          <span style={{ color: "#6366f1", fontWeight: 700 }}>{progress}%</span>
-        </div>
-        <div style={{ height: 4, background: "rgba(255,255,255,0.05)", borderRadius: 4 }}>
-          <div style={{
-            height: "100%", width: `${progress}%`,
-            background: "linear-gradient(90deg,#4f46e5,#818cf8)",
-            borderRadius: 4, transition: "width 0.4s ease",
-          }} />
-        </div>
-
-        {/* Dots angles */}
-        <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 12 }}>
-          {ANGLES.map((a, i) => {
-            const done   = (captures[a.id] || 0) >= CAPTURES_PER_ANGLE
-            const active = i === angleIdx && phase === "RUNNING"
-            return (
-              <div key={a.id} title={a.label} style={{
-                flex: 1, maxWidth: 52, height: 36, borderRadius: 8,
-                display: "flex", flexDirection: "column",
-                alignItems: "center", justifyContent: "center", gap: 1,
-                fontSize: done ? 14 : 16,
-                border: `1.5px solid ${done ? "#10b981" : active ? a.color : "rgba(255,255,255,0.06)"}`,
-                background: done ? "rgba(16,185,129,0.08)" : active ? `${a.color}18` : "transparent",
-                color: done ? "#10b981" : active ? a.color : "#334155",
-                transition: "all 0.3s ease",
-                transform: active ? "scale(1.08)" : "scale(1)",
-              }}>
-                <span>{done ? "✓" : (a.arrow || "●")}</span>
-                <span style={{ fontSize: 8, opacity: 0.6 }}>{a.label}</span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* ── Message bas de page ──────────────────────────────────────────────── */}
-      <div style={{ padding: "12px 16px 24px", textAlign: "center" }}>
-        {phase === "INIT" && (
-          <p style={{ color: "#334155", fontSize: 12, margin: 0 }}>
-            Initialisation de la caméra…
-          </p>
-        )}
+        {/* ── Overlay countdown ────────────────────────────────────────────── */}
         {phase === "COUNTDOWN" && (
-          <p style={{ color: "#6366f1", fontSize: 13, fontWeight: 600, margin: 0 }}>
-            Centrez votre visage dans l'ovale
-          </p>
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 4,
+            borderRadius: "50%",
+            background: "rgba(0,0,0,0.6)",
+            backdropFilter: "blur(4px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <div style={{
+              fontSize: 100, fontWeight: 800, color: "#fff",
+              lineHeight: 1,
+              animation: "countPop 0.35s cubic-bezier(.4,0,.2,1)",
+            }}>
+              {countdown}
+            </div>
+          </div>
         )}
-        {phase === "RUNNING" && (
-          <p style={{ color: "#1e293b", fontSize: 11, margin: 0, lineHeight: 1.5 }}>
-            L'enrôlement s'effectue automatiquement · Bougez lentement la tête
-          </p>
-        )}
-        {phase === "FINALIZING" && (
-          <p style={{ color: "#34d399", fontSize: 13, fontWeight: 600, margin: 0 }}>
-            ⏳ Calcul des embeddings en cours…
-          </p>
-        )}
-      </div>
-    </div>
-  )
-}
 
-function QualBar({ label, value, color }) {
-  return (
-    <div style={{ flex: 1 }}>
-      <div style={{
-        display: "flex", justifyContent: "space-between",
-        fontSize: 9, color: "#475569", marginBottom: 3, fontWeight: 600,
-      }}>
-        <span>{label}</span>
-        <span style={{ color }}>{Math.round(value)}%</span>
+        {/* ── Overlay finalisation ─────────────────────────────────────────── */}
+        {phase === "FINALIZING" && (
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 4,
+            borderRadius: "50%",
+            background: "rgba(0,0,0,0.7)",
+            backdropFilter: "blur(6px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <div style={{
+              fontSize: 80, color: "#10b981",
+              animation: "checkPop 0.5s cubic-bezier(.4,0,.2,1)",
+            }}>
+              ✓
+            </div>
+          </div>
+        )}
+
+        {/* ── Badge pourcentage ────────────────────────────────────────────── */}
+        {(phase === "RUNNING" || phase === "FINALIZING") && (
+          <div style={{
+            position: "absolute",
+            bottom: -22,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 5,
+            background: "rgba(255,255,255,0.07)",
+            backdropFilter: "blur(16px)",
+            WebkitBackdropFilter: "blur(16px)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 24,
+            padding: "5px 18px",
+            fontSize: 14,
+            fontWeight: 700,
+            color: progress === 100 ? "#10b981" : "#fff",
+            whiteSpace: "nowrap",
+            transition: "color 0.4s ease",
+            letterSpacing: -0.3,
+          }}>
+            {progress}%
+          </div>
+        )}
       </div>
-      <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 3 }}>
+
+      {/* ── Section basse ───────────────────────────────────────────────────── */}
+      <div style={{
+        width: "100%",
+        display: "flex", flexDirection: "column",
+        alignItems: "center", gap: 22,
+      }}>
+
+        {/* Indicateurs d'angles (traits) */}
+        {phase === "RUNNING" && (
+          <div style={{
+            display: "flex", gap: 8, alignItems: "center",
+            animation: "fadeIn 0.3s ease",
+          }}>
+            {ANGLES.map((a, i) => {
+              const done   = (captures[a.id] || 0) >= CAPTURES_PER_ANGLE
+              const active = i === angleIdx
+              return (
+                <div key={a.id} style={{
+                  height: 5,
+                  width: done ? 32 : active ? 32 : 22,
+                  borderRadius: 3,
+                  background: done
+                    ? "#10b981"
+                    : active
+                    ? st.ring
+                    : "rgba(255,255,255,0.12)",
+                  transition: "all 0.35s cubic-bezier(.4,0,.2,1)",
+                  animation: active ? "dotPulse 1.5s ease-in-out infinite" : "none",
+                  boxShadow: active ? `0 0 8px ${st.ring}` : done ? "0 0 6px #10b98160" : "none",
+                }} />
+              )
+            })}
+          </div>
+        )}
+
+        {/* Bouton "Passer" si bloqué */}
+        {timeoutReady && phase === "RUNNING" && (
+          <button
+            onClick={skipAngle}
+            style={{
+              padding: "14px 40px",
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 50,
+              background: "rgba(255,255,255,0.08)",
+              color: "rgba(255,255,255,0.85)",
+              fontSize: 16,
+              fontWeight: 600,
+              cursor: "pointer",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              letterSpacing: -0.2,
+              animation: "fadeIn 0.3s ease",
+              transition: "background 0.2s",
+            }}
+            onMouseEnter={e => e.target.style.background = "rgba(255,255,255,0.14)"}
+            onMouseLeave={e => e.target.style.background = "rgba(255,255,255,0.08)"}
+          >
+            Passer  →
+          </button>
+        )}
+
+        {/* Texte bas de page */}
         <div style={{
-          height: "100%", width: `${Math.min(value, 100)}%`,
-          background: color, borderRadius: 3, transition: "width 0.3s",
-        }} />
+          fontSize: 13,
+          color: "rgba(255,255,255,0.3)",
+          textAlign: "center",
+          lineHeight: 1.5,
+          letterSpacing: -0.1,
+        }}>
+          {phase === "INIT"       && "Initialisation de la caméra…"}
+          {phase === "COUNTDOWN"  && "Centrez votre visage dans le cercle"}
+          {phase === "RUNNING"    && "Bougez lentement dans la direction indiquée"}
+          {phase === "FINALIZING" && "Enregistrement en cours…"}
+        </div>
       </div>
     </div>
   )

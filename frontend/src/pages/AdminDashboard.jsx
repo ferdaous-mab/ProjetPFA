@@ -27,9 +27,9 @@ function authHeaders() {
 function Card({ children, style = {} }) {
   return (
     <div style={{
-      background: "rgba(255,255,255,0.03)",
-      border: "1px solid rgba(255,255,255,0.07)",
-      borderRadius: 16, padding: 20, ...style
+      background: "rgba(255,255,255,0.045)",
+      border: "1px solid rgba(255,255,255,0.09)",
+      borderRadius: 18, padding: "20px 22px", ...style
     }}>{children}</div>
   );
 }
@@ -56,9 +56,9 @@ function EmptyState({ message }) {
 function StatCard({ icon, label, value, sub, color }) {
   return (
     <div style={{
-      background: "rgba(255,255,255,0.03)",
-      border: "1px solid rgba(255,255,255,0.07)",
-      borderRadius: 16, padding: "20px 22px",
+      background: "rgba(255,255,255,0.045)",
+      border: "1px solid rgba(255,255,255,0.09)",
+      borderRadius: 18, padding: "20px 22px",
       display: "flex", alignItems: "center", gap: 16,
     }}>
       <div style={{
@@ -548,17 +548,22 @@ export default function AdminDashboard({ user, onLogout }) {
 
       {/* Header */}
       <div className="app-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+          {/* Logo */}
           <div style={{
-            width: 32, height: 32, borderRadius: 8,
+            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
             background: "linear-gradient(135deg,#f59e0b,#ef4444)",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
-          }}>⚙️</div>
-          <span style={{ fontWeight: 700, fontSize: bp.isMobile ? 13 : 15 }}>SmartCampus IA</span>
-          <span className="hide-mobile" style={{
-            background: "rgba(245,158,11,0.15)", color: "#f59e0b",
-            fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
-          }}>Admin</span>
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 13, fontWeight: 800, color: "#fff", letterSpacing: "-0.5px",
+            fontFamily: "'Sora', sans-serif",
+          }}>SC</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ fontWeight: 700, fontSize: 14, lineHeight: 1, color: "#fff" }}>SmartCampus IA</span>
+            <span className="hide-mobile" style={{
+              fontSize: 10, color: "#f59e0b", fontWeight: 600,
+              letterSpacing: "0.06em", textTransform: "uppercase",
+            }}>Administration</span>
+          </div>
         </div>
         <div className="header-actions">
           {overview?.alertes_non_lues > 0 && (

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import HomePage         from "./pages/HomePage";
 import LoginPage        from "./pages/LoginPage";
 import EnrollPage       from "./pages/EnrollPage";
 import AdminDashboard   from "./pages/AdminDashboard";
@@ -24,7 +25,7 @@ export default function App() {
     } catch {
       localStorage.clear();
     }
-    setPage("login");
+    setPage("home");
   }, []);
 
   const handleLogin = (userData) => {
@@ -35,23 +36,36 @@ export default function App() {
   const handleLogout = () => {
     localStorage.clear();
     setUser(null);
-    setPage("login");
+    setPage("home");
   };
 
   if (page === "loading") return null;
+
+  if (page === "home") {
+    return (
+      <HomePage
+        onGoToLogin={() => setPage("login")}
+        onGoToEnroll={() => setPage("enroll")}
+      />
+    );
+  }
 
   if (page === "login") {
     return (
       <LoginPage
         onLogin={handleLogin}
         onGoToEnroll={() => setPage("enroll")}
+        onGoHome={() => setPage("home")}
       />
     );
   }
 
   if (page === "enroll") {
     return (
-      <EnrollPage onGoToLogin={() => setPage("login")} />
+      <EnrollPage
+        onGoToLogin={() => setPage("login")}
+        onGoHome={() => setPage("home")}
+      />
     );
   }
 
@@ -68,8 +82,8 @@ export default function App() {
   }
 
   return (
-    <LoginPage
-      onLogin={handleLogin}
+    <HomePage
+      onGoToLogin={() => setPage("login")}
       onGoToEnroll={() => setPage("enroll")}
     />
   );

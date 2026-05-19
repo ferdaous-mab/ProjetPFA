@@ -5,7 +5,7 @@ import CameraCapture from '../components/CameraCapture'
 
 const API_URL = ""
 
-export default function EnrollPage({ onGoToLogin }) {
+export default function EnrollPage({ onGoToLogin, onGoHome }) {
   const [studentId,    setStudentId]    = useState(null)
   const [credentials,  setCredentials]  = useState(null)
   const [done,         setDone]         = useState(false)
@@ -121,7 +121,44 @@ export default function EnrollPage({ onGoToLogin }) {
     )
   }
 
-  return studentId
-    ? <CameraCapture studentId={studentId} onComplete={(code) => handleCaptureComplete(code)} />
-    : <StudentForm onSuccess={handleFormSuccess} />
+  if (studentId) {
+    return <CameraCapture studentId={studentId} onComplete={(code) => handleCaptureComplete(code)} />
+  }
+
+  return (
+    <div style={{ position: "relative", minHeight: "100vh" }}>
+      {/* Flèche retour accueil */}
+      {onGoHome && (
+        <button
+          onClick={onGoHome}
+          style={{
+            position: "fixed", top: 18, left: 18, zIndex: 50,
+            display: "flex", alignItems: "center", gap: 7,
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 10, padding: "8px 14px",
+            color: "rgba(255,255,255,0.55)", fontSize: 13,
+            fontFamily: "'Sora', sans-serif", fontWeight: 500,
+            cursor: "pointer",
+            transition: "background 0.2s, color 0.2s",
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.1)"
+            e.currentTarget.style.color = "#fff"
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.05)"
+            e.currentTarget.style.color = "rgba(255,255,255,0.55)"
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.8"
+              strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Accueil
+        </button>
+      )}
+      <StudentForm onSuccess={handleFormSuccess} />
+    </div>
+  )
 }

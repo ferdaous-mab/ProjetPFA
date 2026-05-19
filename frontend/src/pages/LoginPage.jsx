@@ -5,11 +5,13 @@ import { useBreakpoint } from "../utils/useBreakpoint";
 const API_URL = "";
 const ACCENT = "#6366f1";
 
-export default function LoginPage({ onLogin, onGoToEnroll }) {
+export default function LoginPage({ onLogin, onGoToEnroll, onGoHome }) {
   const bp = useBreakpoint();
   const [form,    setForm]    = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState("");
+
+  const [showPassword, setShowPassword] = useState(false);
 
   const [showForgot,   setShowForgot]   = useState(false);
   const [forgotEmail,  setForgotEmail]  = useState("");
@@ -64,6 +66,39 @@ export default function LoginPage({ onLogin, onGoToEnroll }) {
       position: "relative",
       overflow: "hidden",
     }}>
+
+      {/* Flèche retour page principale */}
+      {onGoHome && (
+        <button
+          onClick={onGoHome}
+          title="Retour à l'accueil"
+          style={{
+            position: "absolute", top: 20, left: 20,
+            display: "flex", alignItems: "center", gap: 7,
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 10, padding: "8px 14px",
+            color: "rgba(255,255,255,0.55)", fontSize: 13,
+            fontFamily: "'Sora', sans-serif", fontWeight: 500,
+            cursor: "pointer", zIndex: 10,
+            transition: "background 0.2s, color 0.2s",
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+            e.currentTarget.style.color = "#fff";
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+            e.currentTarget.style.color = "rgba(255,255,255,0.55)";
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.8"
+              strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Accueil
+        </button>
+      )}
 
       {/* Background glow */}
       <div style={{
@@ -158,9 +193,46 @@ export default function LoginPage({ onLogin, onGoToEnroll }) {
               <input className="sc-input" name="email" type="email"
                 placeholder="Adresse email" value={form.email}
                 onChange={handleChange} required />
-              <input className="sc-input" name="password" type="password"
-                placeholder="Mot de passe" value={form.password}
-                onChange={handleChange} required />
+              {/* Champ mot de passe avec œil */}
+              <div style={{ position: "relative" }}>
+                <input className="sc-input" name="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Mot de passe" value={form.password}
+                  onChange={handleChange} required
+                  style={{ paddingRight: 46 }} />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  style={{
+                    position: "absolute", right: 13, top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer",
+                    padding: 4, color: "rgba(255,255,255,0.35)",
+                    display: "flex", alignItems: "center",
+                    transition: "color 0.2s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = "rgba(255,255,255,0.75)"}
+                  onMouseLeave={e => e.currentTarget.style.color = "rgba(255,255,255,0.35)"}
+                  title={showPassword ? "Masquer" : "Afficher"}
+                >
+                  {showPassword ? (
+                    /* Œil barré */
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                      <line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>
+                  ) : (
+                    /* Œil ouvert */
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
               <button type="submit" className="sc-btn" disabled={loading} style={{ marginTop: 6 }}>
                 {loading ? "Connexion en cours..." : "Se connecter →"}
               </button>
@@ -218,17 +290,30 @@ export default function LoginPage({ onLogin, onGoToEnroll }) {
           </>
         )}
 
-        {/* Lien inscription étudiant */}
+        {/* Inscription étudiant */}
         <div style={{
           marginTop: 24, paddingTop: 20,
           borderTop: "1px solid rgba(255,255,255,0.07)",
-          textAlign: "center",
         }}>
-          <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, marginBottom: 12 }}>
-            Étudiant sans compte ?
-          </p>
+          <div style={{
+            display: "flex", alignItems: "flex-start", gap: 10,
+            background: "rgba(99,102,241,0.06)",
+            border: "1px solid rgba(99,102,241,0.15)",
+            borderRadius: 12, padding: "12px 14px",
+            marginBottom: 12,
+          }}>
+            <span style={{ fontSize: 15, lineHeight: 1, marginTop: 1, flexShrink: 0 }}>ℹ️</span>
+            <p style={{
+              color: "rgba(255,255,255,0.45)", fontSize: 12,
+              margin: 0, lineHeight: 1.55,
+            }}>
+              L'inscription est <strong style={{ color: "rgba(255,255,255,0.65)", fontWeight: 600 }}>
+              réservée aux étudiants sans compte</strong>. Elle nécessite un enrôlement facial.
+              Si vous avez déjà un compte, connectez-vous ci-dessus.
+            </p>
+          </div>
           <button className="sc-btn sc-btn-ghost" onClick={onGoToEnroll}
-            style={{ padding: "11px", fontSize: 13 }}>
+            style={{ padding: "11px", fontSize: 13, width: "100%" }}>
             S'inscrire — Enrôlement facial →
           </button>
         </div>
