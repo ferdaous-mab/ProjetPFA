@@ -13,7 +13,7 @@ from db.crud import (
     create_emploi_temps, get_emplois_by_classe,
     get_all_students, delete_student,
 )
-from db.models import User, Matiere, EmploiTemps, StudentImage, Attendance, Grade
+from db.models import User, Matiere, EmploiTemps, StudentImage, Attendance, Grade, Student
 from datetime import time
 
 router = APIRouter()
@@ -511,8 +511,187 @@ async def delete_etudiant(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Supprimer définitivement un étudiant."""
+    """Supprimer définitivement un étudiant et son compte utilisateur lié."""
+    # Supprimer le compte User lié (évite les comptes orphelins)
+    linked_user = db.query(User).filter(User.student_id == student_id).first()
+    if linked_user:
+        db.delete(linked_user)
+        db.flush()
+
     success = delete_student(db, student_id)
     if not success:
+        db.rollback()
         raise HTTPException(status_code=404, detail="Étudiant introuvable")
-    return {"success": True, "message": "Étudiant supprimé"}
+    return {"success": True, "message": "Étudiant et compte supprimés"}
+
+
+# ── CRÉER COMPTE POUR UN ÉTUDIANT ─────────────────────────────────────────────
+
+@router.post("/gestion/etudiants/{student_id}/creer-compte")
+async def creer_compte_etudiant(
+    student_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Créer (ou réactiver) un compte pour un étudiant enrôlé sans compte."""
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Étudiant introuvable")
+
+    # Vérifier si un compte existe déjà (par student_id ou par email)
+    existing = db.query(User).filter(User.student_id == student.id).first()
+    if not existing:
+        existing = db.query(User).filter(User.email == student.email).first()
+
+    if existing:
+        changed = False
+        if existing.student_id != student.id:
+            existing.student_id = student.id   # réparer le lien manquant
+            changed = True
+        if not existing.is_active:
+            existing.is_active = True
+            changed = True
+        if changed:
+            db.commit()
+            return {"success": True, "reactivated": True, "already_active": False, "message": "Compte lié et activé"}
+        return {"success": True, "reactivated": False, "already_active": True, "message": "Compte déjà actif"}
+
+    # Générer un mot de passe provisoire
+    import secrets, string
+    alphabet = string.ascii_letters + string.digits
+    temp_pwd = ''.join(secrets.choice(alphabet) for _ in range(10))
+
+    new_user = User(
+        email         = student.email,
+        password_hash = hash_password(temp_pwd),
+        role          = "etudiant",
+        nom           = student.nom,
+        prenom        = student.prenom,
+        student_id    = student.id,
+        is_active     = True,
+    )
+    db.add(new_user)
+    db.commit()
+    return {"success": True, "reactivated": False, "password": temp_pwd, "message": "Compte créé"}
+
+
+# ── COMPTES ORPHELINS ─────────────────────────────────────────────────────────
+
+@router.get("/gestion/comptes-orphelins")
+async def get_comptes_orphelins(
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Liste les comptes étudiants sans lien vers un profil (student_id NULL)."""
+    users = db.query(User).filter(
+        User.role == "etudiant",
+        User.student_id == None  # noqa: E711
+    ).all()
+    return [{
+        "user_id":   str(u.id),
+        "nom":       u.nom,
+        "prenom":    u.prenom,
+        "email":     u.email,
+        "is_active": u.is_active,
+    } for u in users]
+
+
+class CreerProfilRequest(BaseModel):
+    classe:         str
+    annee_scolaire: str = "2025-2026"
+
+
+@router.post("/gestion/comptes-orphelins/{user_id}/creer-profil")
+async def creer_profil_orphelin(
+    user_id: str,
+    req: CreerProfilRequest,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Crée un profil Student pour un compte orphelin et les lie."""
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.role == "etudiant",
+        User.student_id == None  # noqa: E711
+    ).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Compte orphelin introuvable")
+
+    # Vérifier qu'aucun Student avec cet email n'existe déjà
+    existing_student = db.query(Student).filter(Student.email == user.email).first()
+    if existing_student:
+        # Lier au student existant
+        user.student_id = existing_student.id
+        user.is_active  = True
+        db.commit()
+        return {"success": True, "message": f"Lié au profil existant de {existing_student.prenom} {existing_student.nom}"}
+
+    student = Student(
+        nom            = user.nom,
+        prenom         = user.prenom,
+        email          = user.email,
+        classe         = req.classe,
+        annee_scolaire = req.annee_scolaire,
+        is_enrolled    = False,
+    )
+    db.add(student)
+    db.flush()
+
+    user.student_id = student.id
+    user.is_active  = True
+    db.commit()
+    return {"success": True, "message": f"Profil créé et lié pour {user.prenom} {user.nom}"}
+
+
+@router.delete("/gestion/comptes-orphelins/{user_id}")
+async def delete_compte_orphelin(
+    user_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Supprimer un compte orphelin."""
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.role == "etudiant",
+        User.student_id == None  # noqa: E711
+    ).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Compte orphelin introuvable")
+    db.delete(user)
+    db.commit()
+    return {"success": True, "message": "Compte supprimé"}
+
+
+class LienCompteRequest(BaseModel):
+    user_id:    str
+    student_id: str
+
+
+@router.post("/gestion/lier-compte-etudiant")
+async def lier_compte_etudiant(
+    req: LienCompteRequest,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Lie manuellement un compte User à un profil Student."""
+    user = db.query(User).filter(User.id == req.user_id, User.role == "etudiant").first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Compte étudiant introuvable")
+
+    student = db.query(Student).filter(Student.id == req.student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Profil étudiant introuvable")
+
+    existing = db.query(User).filter(
+        User.student_id == student.id,
+        User.id != user.id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400,
+            detail=f"Ce profil est déjà lié au compte {existing.email}")
+
+    user.student_id = student.id
+    if not user.is_active:
+        user.is_active = True
+    db.commit()
+    return {"success": True, "message": f"Compte {user.email} lié à {student.prenom} {student.nom}"}

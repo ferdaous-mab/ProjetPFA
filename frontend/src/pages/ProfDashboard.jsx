@@ -13,7 +13,7 @@ function authHeaders() {
 
 function Card({ children, style = {} }) {
   return (
-    <div style={{
+    <div className="sc-card" style={{
       background: "rgba(255,255,255,0.045)",
       border: "1px solid rgba(255,255,255,0.09)",
       borderRadius: 18, padding: "20px 22px", ...style
@@ -23,8 +23,12 @@ function Card({ children, style = {} }) {
 
 function SectionTitle({ title, icon }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-      <span style={{ fontSize: 18 }}>{icon}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+      <div style={{
+        width: 32, height: 32, borderRadius: 9,
+        background: "rgba(14,165,233,0.15)",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0,
+      }}>{icon}</div>
       <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#fff" }}>{title}</h2>
     </div>
   );
@@ -32,10 +36,10 @@ function SectionTitle({ title, icon }) {
 
 function EmptyState({ message }) {
   return (
-    <div style={{ textAlign: "center", padding: "32px 20px",
-      color: "rgba(255,255,255,0.25)", fontSize: 13 }}>
-      <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
-      {message}
+    <div style={{ textAlign: "center", padding: "48px 20px",
+      color: "rgba(255,255,255,0.22)", fontSize: 13 }}>
+      <div style={{ fontSize: 36, marginBottom: 12, filter: "grayscale(30%) opacity(0.6)" }}>📋</div>
+      <div style={{ fontWeight: 500 }}>{message}</div>
     </div>
   );
 }
@@ -121,8 +125,11 @@ export default function ProfDashboard({ user, onLogout }) {
     s === "high" ? "#ef4444" : s === "medium" ? "#f59e0b" : "#6366f1";
 
   return (
-    <div style={{ minHeight: "100vh", background: "#05050f",
-      fontFamily: "'Sora', sans-serif", color: "#fff" }}>
+    <div style={{
+      minHeight: "100vh",
+      background: "radial-gradient(ellipse 90% 55% at 50% -5%, rgba(14,165,233,0.09) 0%, transparent 65%), #05050f",
+      fontFamily: "'Sora', sans-serif", color: "#fff",
+    }}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap')"}</style>
 
       {showVoice && (
@@ -156,13 +163,13 @@ export default function ProfDashboard({ user, onLogout }) {
           <span className="header-username" style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
             {user?.prenom} {user?.nom}
           </span>
-          <button onClick={() => setShowVoice(true)} style={{
+          <button onClick={() => setShowVoice(true)} className="sc-btn" style={{
             background: "linear-gradient(135deg,#6366f1,#a855f7)",
             border: "none", borderRadius: 8, color: "#fff", cursor: "pointer",
             padding: bp.isMobile ? "6px 10px" : "6px 14px",
             fontFamily: "Sora, sans-serif", fontSize: 12, fontWeight: 600,
           }}>{bp.isMobile ? "🎤" : "🎤 Assistant IA"}</button>
-          <button onClick={onLogout} style={{
+          <button onClick={onLogout} className="sc-btn" style={{
             background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8, color: "rgba(255,255,255,0.6)", cursor: "pointer",
             padding: bp.isMobile ? "6px 10px" : "6px 14px",
@@ -196,31 +203,34 @@ export default function ProfDashboard({ user, onLogout }) {
       {/* Contenu */}
       <div className="page-body" style={{ maxWidth: 900 }}>
         {loading && (
-          <div style={{ textAlign: "center", padding: 60,
-            color: "rgba(255,255,255,0.3)" }}>Chargement...</div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
+            justifyContent: "center", gap: 16, padding: "80px 20px" }}>
+            <div className="sc-spinner sc-spinner-cyan" />
+            <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, fontWeight: 500 }}>Chargement...</span>
+          </div>
         )}
 
         {/* Mes matières */}
         {!loading && activeTab === "overview" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ display: "grid", gridTemplateColumns: bp.colsAuto, gap: bp.gap2 }}>
-              <Card>
-                <div style={{ fontSize: 28, fontWeight: 700 }}>{overview?.nb_matieres || 0}</div>
-                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 4 }}>Matières</div>
+              <Card style={{ borderTop: "2px solid #0ea5e9" }}>
+                <div style={{ fontSize: 30, fontWeight: 700, color: "#0ea5e9" }}>{overview?.nb_matieres || 0}</div>
+                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 4, fontWeight: 500 }}>Matières</div>
               </Card>
-              <Card>
-                <div style={{ fontSize: 28, fontWeight: 700 }}>
+              <Card style={{ borderTop: "2px solid #6366f1" }}>
+                <div style={{ fontSize: 30, fontWeight: 700, color: "#a5b4fc" }}>
                   {overview?.matieres?.reduce((s, m) => s + m.nb_sessions, 0) || 0}
                 </div>
-                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 4 }}>Séances</div>
+                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 4, fontWeight: 500 }}>Séances</div>
               </Card>
-              <Card>
-                <div style={{ fontSize: 28, fontWeight: 700, color: "#22c55e" }}>
+              <Card style={{ borderTop: "2px solid #22c55e" }}>
+                <div style={{ fontSize: 30, fontWeight: 700, color: "#22c55e" }}>
                   {overview?.matieres?.length > 0
                     ? Math.round(overview.matieres.reduce((s, m) => s + m.taux_presence, 0) / overview.matieres.length)
                     : 0}%
                 </div>
-                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 4 }}>Taux présence moyen</div>
+                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 4, fontWeight: 500 }}>Taux présence moyen</div>
               </Card>
             </div>
 
@@ -358,13 +368,15 @@ export default function ProfDashboard({ user, onLogout }) {
               ? <EmptyState message="Aucune alerte ✅" />
               : alertes.map((a, i) => (
                 <div key={i} style={{
-                  padding: "12px 14px", marginBottom: 8,
-                  background: `${severityColor(a.severity)}10`,
-                  border: `1px solid ${severityColor(a.severity)}30`,
+                  padding: "13px 16px", marginBottom: 8,
+                  background: `${severityColor(a.severity)}0d`,
+                  border: `1px solid ${severityColor(a.severity)}25`,
+                  borderLeft: `3px solid ${severityColor(a.severity)}`,
                   borderRadius: 10,
+                  transition: "background 0.15s ease",
                 }}>
-                  <div style={{ fontSize: 13 }}>{a.message}</div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{a.message}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 5 }}>
                     {new Date(a.date).toLocaleDateString("fr-FR")}
                   </div>
                 </div>
@@ -424,6 +436,7 @@ export default function ProfDashboard({ user, onLogout }) {
                 <button
                   onClick={changePassword}
                   disabled={pwLoading}
+                  className="sc-btn"
                   style={{
                     padding: "9px 18px", border: "none", borderRadius: 9,
                     background: "#0ea5e9", color: "#fff", cursor: "pointer",
@@ -434,10 +447,11 @@ export default function ProfDashboard({ user, onLogout }) {
                 </button>
                 {pwMsg && (
                   <div style={{
-                    padding: "10px 14px", borderRadius: 8, fontSize: 13,
+                    padding: "11px 16px", borderRadius: 8, fontSize: 13, fontWeight: 500,
                     background: pwMsg.startsWith("✅")
                       ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
                     border: `1px solid ${pwMsg.startsWith("✅") ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                    borderLeft: `3px solid ${pwMsg.startsWith("✅") ? "#22c55e" : "#ef4444"}`,
                     color: pwMsg.startsWith("✅") ? "#22c55e" : "#ef4444",
                   }}>
                     {pwMsg}

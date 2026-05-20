@@ -57,7 +57,7 @@ export default function LoginPage({ onLogin, onGoToEnroll, onGoHome }) {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#05050f",
+      background: "radial-gradient(ellipse 80% 60% at 50% 0%, rgba(99,102,241,0.1) 0%, transparent 60%), #05050f",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",

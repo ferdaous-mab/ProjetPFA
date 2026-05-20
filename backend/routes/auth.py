@@ -73,7 +73,7 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
                 status_code=400,
                 detail="Enrôlement facial non complété"
             )
-        student_id = str(student.id)
+        student_id = student.id  # garder comme UUID object, pas str
 
     user = create_user(
         db,
@@ -229,4 +229,27 @@ async def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db
     reset_token.used      = True
     db.commit()
 
+    return {"success": True, "message": "Mot de passe modifié avec succès"}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password:     str
+
+
+@router.put("/auth/change-password")
+async def change_password(
+    req:         ChangePasswordRequest,
+    db:          Session = Depends(get_db),
+    current_user         = Depends(get_current_user),
+):
+    """Changement de mot de passe pour un utilisateur connecté."""
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit contenir au moins 6 caractères")
+
+    if not verify_password(req.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect")
+
+    current_user.password_hash = hash_password(req.new_password)
+    db.commit()
     return {"success": True, "message": "Mot de passe modifié avec succès"}

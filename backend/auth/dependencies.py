@@ -1,9 +1,12 @@
+import logging
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from auth.jwt_handler import decode_token
 from db.crud import get_user_by_id
 from config import SessionLocal
+
+logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
 
@@ -13,7 +16,10 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 def get_current_user(
@@ -47,6 +53,22 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Utilisateur introuvable ou désactivé"
         )
+
+    # Auto-réparer : si un compte étudiant a perdu son student_id (ON DELETE SET NULL
+    # ou bug d'insertion), retrouver l'étudiant par email et rétablir le lien.
+    if user.role == "etudiant" and not user.student_id:
+        logger.warning(f"[auto-repair] user_id={user.id} email={user.email} — student_id manquant, recherche par email...")
+        from db.models import Student
+        from sqlalchemy import func
+        student = db.query(Student).filter(
+            func.lower(Student.email) == func.lower(user.email)
+        ).first()
+        logger.warning(f"[auto-repair] student trouvé: {student is not None} (id={student.id if student else 'N/A'})")
+        if student:
+            user.student_id = student.id
+            db.commit()
+            db.refresh(user)
+            logger.warning(f"[auto-repair] student_id rétabli: {user.student_id}")
 
     return user
 

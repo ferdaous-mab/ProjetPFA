@@ -26,7 +26,7 @@ function authHeaders() {
 
 function Card({ children, style = {} }) {
   return (
-    <div style={{
+    <div className="sc-card" style={{
       background: "rgba(255,255,255,0.045)",
       border: "1px solid rgba(255,255,255,0.09)",
       borderRadius: 18, padding: "20px 22px", ...style
@@ -36,8 +36,12 @@ function Card({ children, style = {} }) {
 
 function SectionTitle({ title, icon }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-      <span style={{ fontSize: 18 }}>{icon}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+      <div style={{
+        width: 32, height: 32, borderRadius: 9,
+        background: "rgba(99,102,241,0.15)",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0,
+      }}>{icon}</div>
       <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#fff" }}>{title}</h2>
     </div>
   );
@@ -45,32 +49,37 @@ function SectionTitle({ title, icon }) {
 
 function EmptyState({ message }) {
   return (
-    <div style={{ textAlign: "center", padding: "40px 20px",
-      color: "rgba(255,255,255,0.25)", fontSize: 14 }}>
-      <div style={{ fontSize: 36, marginBottom: 8 }}>📊</div>
-      {message}
+    <div style={{ textAlign: "center", padding: "48px 20px",
+      color: "rgba(255,255,255,0.22)", fontSize: 14 }}>
+      <div style={{
+        fontSize: 38, marginBottom: 12,
+        filter: "grayscale(30%) opacity(0.6)",
+      }}>📊</div>
+      <div style={{ fontWeight: 500 }}>{message}</div>
     </div>
   );
 }
 
 function StatCard({ icon, label, value, sub, color }) {
   return (
-    <div style={{
+    <div className="sc-card" style={{
       background: "rgba(255,255,255,0.045)",
       border: "1px solid rgba(255,255,255,0.09)",
+      borderTop: `2px solid ${color}`,
       borderRadius: 18, padding: "20px 22px",
       display: "flex", alignItems: "center", gap: 16,
     }}>
       <div style={{
-        width: 48, height: 48, borderRadius: 12,
-        background: `${color}22`, display: "flex",
+        width: 50, height: 50, borderRadius: 13,
+        background: `${color}1a`, display: "flex",
         alignItems: "center", justifyContent: "center",
-        fontSize: 22, flexShrink: 0,
+        fontSize: 24, flexShrink: 0,
+        boxShadow: `0 0 0 1px ${color}30`,
       }}>{icon}</div>
       <div>
-        <div style={{ fontSize: 26, fontWeight: 700, color: "#fff" }}>{value}</div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>{label}</div>
-        {sub && <div style={{ fontSize: 11, color, marginTop: 2 }}>{sub}</div>}
+        <div style={{ fontSize: 28, fontWeight: 700, color: "#fff", lineHeight: 1.1 }}>{value}</div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 3, fontWeight: 500 }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color, marginTop: 3, fontWeight: 600 }}>{sub}</div>}
       </div>
     </div>
   );
@@ -79,6 +88,7 @@ function StatCard({ icon, label, value, sub, color }) {
 function Input({ placeholder, value, onChange, type = "text", style = {} }) {
   return (
     <input type={type} placeholder={placeholder} value={value} onChange={onChange}
+      className="sc-input"
       style={{
         width: "100%", padding: "10px 14px",
         background: "rgba(255,255,255,0.05)",
@@ -92,9 +102,9 @@ function Input({ placeholder, value, onChange, type = "text", style = {} }) {
 
 function Select({ value, onChange, children, style = {} }) {
   return (
-    <select value={value} onChange={onChange} style={{
+    <select value={value} onChange={onChange} className="sc-select" style={{
       width: "100%", padding: "10px 14px",
-      background: "#111", border: "1px solid rgba(255,255,255,0.1)",
+      background: "#0d0d1a", border: "1px solid rgba(255,255,255,0.1)",
       borderRadius: 10, color: "#fff", fontSize: 13,
       fontFamily: "Sora, sans-serif", outline: "none",
       boxSizing: "border-box", ...style,
@@ -104,7 +114,7 @@ function Select({ value, onChange, children, style = {} }) {
 
 function Btn({ onClick, children, color = "#6366f1", style = {} }) {
   return (
-    <button onClick={onClick} style={{
+    <button onClick={onClick} className="sc-btn" style={{
       padding: "9px 18px", border: "none", borderRadius: 9,
       background: color, color: "#fff", cursor: "pointer",
       fontFamily: "Sora, sans-serif", fontSize: 13, fontWeight: 600, ...style,
@@ -145,6 +155,13 @@ export default function AdminDashboard({ user, onLogout }) {
   const [editForm,          setEditForm]          = useState({});
   const [editLoading,       setEditLoading]       = useState(false);
 
+  // Comptes orphelins
+  const [orphelins,     setOrphelins]     = useState([]);
+  const [linkTarget,    setLinkTarget]    = useState(null);
+  const [linkStudentId, setLinkStudentId] = useState("");
+  const [profilTarget,  setProfilTarget]  = useState(null);  // user pour "Créer profil"
+  const [profilForm,    setProfilForm]    = useState({ classe: "1A", annee_scolaire: "2025-2026" });
+
   useEffect(() => { loadBI(); }, []);
   useEffect(() => { if (activeTab === "gestion") loadGestion(); }, [activeTab]);
 
@@ -176,20 +193,44 @@ export default function AdminDashboard({ user, onLogout }) {
   };
 
   const loadGestion = async () => {
-    const [pr, mt, em, et] = await Promise.allSettled([
-      axios.get(`${API_URL}/api/gestion/professeurs`, authHeaders()),
-      axios.get(`${API_URL}/api/gestion/matieres`,    authHeaders()),
-      axios.get(`${API_URL}/api/gestion/emplois`,     authHeaders()),
-      axios.get(`${API_URL}/api/gestion/etudiants`,   authHeaders()),
+    const [pr, mt, em, et, or_] = await Promise.allSettled([
+      axios.get(`${API_URL}/api/gestion/professeurs`,       authHeaders()),
+      axios.get(`${API_URL}/api/gestion/matieres`,          authHeaders()),
+      axios.get(`${API_URL}/api/gestion/emplois`,           authHeaders()),
+      axios.get(`${API_URL}/api/gestion/etudiants`,         authHeaders()),
+      axios.get(`${API_URL}/api/gestion/comptes-orphelins`, authHeaders()),
     ]);
     if (pr.status === "fulfilled") setProfs(pr.value.data);
-    else console.error("Profs:", pr.reason);
     if (mt.status === "fulfilled") setMatieres(mt.value.data);
-    else console.error("Matieres:", mt.reason);
     if (em.status === "fulfilled") setEmplois(em.value.data);
-    else console.error("Emplois:", em.reason);
     if (et.status === "fulfilled") setEtudiants(et.value.data);
-    else console.error("Etudiants:", et.reason);
+    if (or_.status === "fulfilled") setOrphelins(or_.value.data);
+  };
+
+  const lierCompteEtudiant = async () => {
+    if (!linkTarget || !linkStudentId) return;
+    try {
+      await axios.post(`${API_URL}/api/gestion/lier-compte-etudiant`,
+        { user_id: linkTarget.user_id, student_id: linkStudentId }, authHeaders());
+      showMsg("✅ Compte lié avec succès !");
+      setLinkTarget(null);
+      setLinkStudentId("");
+      loadGestion();
+    } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
+  };
+
+  const creerProfilOrphelin = async () => {
+    if (!profilTarget) return;
+    try {
+      await axios.post(
+        `${API_URL}/api/gestion/comptes-orphelins/${profilTarget.user_id}/creer-profil`,
+        profilForm, authHeaders()
+      );
+      showMsg("✅ Profil créé et compte activé !");
+      setProfilTarget(null);
+      setProfilForm({ classe: "1A", annee_scolaire: "2025-2026" });
+      loadGestion();
+    } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
   };
 
   const showMsg = (m) => { setMsg(m); setTimeout(() => setMsg(""), 3000); };
@@ -271,6 +312,32 @@ export default function AdminDashboard({ user, onLogout }) {
     loadGestion();
   };
 
+  const creerCompteEtudiant = async (s) => {
+    try {
+      const res = await axios.post(`${API_URL}/api/gestion/etudiants/${s.id}/creer-compte`, {}, authHeaders());
+      if (res.data.already_active) {
+        showMsg("ℹ️ Ce compte est déjà actif");
+      } else if (res.data.reactivated) {
+        showMsg("✅ Compte réactivé !");
+      } else {
+        showMsg(`✅ Compte créé — mot de passe provisoire : ${res.data.password}`);
+      }
+    } catch (e) {
+      showMsg("❌ " + (e.response?.data?.detail || "Erreur"));
+    } finally {
+      loadGestion();
+    }
+  };
+
+  const deleteOrphelin = async (userId) => {
+    if (!confirm("Supprimer définitivement ce compte ?")) return;
+    try {
+      await axios.delete(`${API_URL}/api/gestion/comptes-orphelins/${userId}`, authHeaders());
+      showMsg("✅ Compte supprimé");
+      loadGestion();
+    } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
+  };
+
   const addMat = async () => {
     try {
       const payload = { ...formMat, coefficient: parseFloat(formMat.coefficient) };
@@ -329,8 +396,11 @@ export default function AdminDashboard({ user, onLogout }) {
     s === "high" ? "#ef4444" : s === "medium" ? "#f59e0b" : "#6366f1";
 
   return (
-    <div style={{ minHeight: "100vh", background: "#05050f",
-      fontFamily: "'Sora', sans-serif", color: "#fff" }}>
+    <div style={{
+      minHeight: "100vh",
+      background: "radial-gradient(ellipse 90% 55% at 50% -5%, rgba(99,102,241,0.09) 0%, transparent 65%), #05050f",
+      fontFamily: "'Sora', sans-serif", color: "#fff",
+    }}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap')"}</style>
 
       {/* Modal Étudiant */}
@@ -369,15 +439,6 @@ export default function AdminDashboard({ user, onLogout }) {
                 display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0,
                 background: "#0b0b18", zIndex: 10,
               }}>
-                <div style={{
-                  width: 60, height: 60, borderRadius: 14, flexShrink: 0,
-                  background: "linear-gradient(135deg,#6366f1,#a855f7)",
-                  overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26,
-                }}>
-                  {s.photo_url
-                    ? <img src={s.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                    : "🎓"}
-                </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 18, fontWeight: 700 }}>{s.prenom} {s.nom}</div>
                   <div style={{ display: "flex", gap: 7, marginTop: 6, flexWrap: "wrap" }}>
@@ -552,10 +613,11 @@ export default function AdminDashboard({ user, onLogout }) {
           {/* Logo */}
           <div style={{
             width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-            background: "linear-gradient(135deg,#f59e0b,#ef4444)",
+            background: "linear-gradient(135deg,#6366f1,#a855f7)",
             display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: 13, fontWeight: 800, color: "#fff", letterSpacing: "-0.5px",
             fontFamily: "'Sora', sans-serif",
+            boxShadow: "0 0 0 1px rgba(99,102,241,0.4), 0 4px 12px rgba(99,102,241,0.2)",
           }}>SC</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <span style={{ fontWeight: 700, fontSize: 14, lineHeight: 1, color: "#fff" }}>SmartCampus IA</span>
@@ -572,16 +634,16 @@ export default function AdminDashboard({ user, onLogout }) {
               🔔 {overview.alertes_non_lues}
             </div>
           )}
-          <button onClick={() => setShowVoice(true)} style={{
+          <button onClick={() => setShowVoice(true)} className="sc-btn" style={{
             background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)",
-            borderRadius: 8, color: "#6366f1", cursor: "pointer",
+            borderRadius: 8, color: "#a5b4fc", cursor: "pointer",
             padding: bp.isMobile ? "6px 10px" : "6px 14px",
             fontFamily: "Sora, sans-serif", fontSize: 12, fontWeight: 600,
           }}>{bp.isMobile ? "🎤" : "🎤 Assistant IA"}</button>
           <span className="header-username" style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
             {user?.prenom} {user?.nom}
           </span>
-          <button onClick={onLogout} style={{
+          <button onClick={onLogout} className="sc-btn" style={{
             background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8, color: "rgba(255,255,255,0.6)", cursor: "pointer",
             padding: bp.isMobile ? "6px 10px" : "6px 14px",
@@ -617,13 +679,16 @@ export default function AdminDashboard({ user, onLogout }) {
 
       <div className="page-body">
         {loading && activeTab !== "gestion" && (
-          <div style={{ textAlign: "center", padding: 60,
-            color: "rgba(255,255,255,0.3)" }}>Chargement...</div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
+            justifyContent: "center", gap: 16, padding: "80px 20px" }}>
+            <div className="sc-spinner" />
+            <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, fontWeight: 500 }}>Chargement...</span>
+          </div>
         )}
 
         {/* Vue d'ensemble */}
         {!loading && activeTab === "overview" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <div style={{ display: "grid", gridTemplateColumns: bp.colsAuto, gap: bp.gap2 }}>
               <StatCard icon="🎓" label="Étudiants" color="#6366f1"
                 value={overview?.total_etudiants || 0}
@@ -842,22 +907,25 @@ export default function AdminDashboard({ user, onLogout }) {
             {alertes.length === 0 ? <EmptyState message="Aucune alerte ✅" /> :
               alertes.map((a, i) => (
                 <div key={i} style={{
-                  background: `${severityColor(a.severity)}10`,
-                  border: `1px solid ${severityColor(a.severity)}30`,
-                  borderRadius: 12, padding: "12px 16px",
+                  background: `${severityColor(a.severity)}0d`,
+                  border: `1px solid ${severityColor(a.severity)}25`,
+                  borderLeft: `3px solid ${severityColor(a.severity)}`,
+                  borderRadius: 12, padding: "13px 16px",
                   display: "flex", alignItems: "center", gap: 12, marginBottom: 8,
+                  transition: "background 0.15s ease",
                 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%",
-                    background: severityColor(a.severity), flexShrink: 0 }} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13 }}>{a.message}</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 3 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{a.message}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 4 }}>
                       {new Date(a.created_at).toLocaleDateString("fr-FR")}
                     </div>
                   </div>
-                  <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6,
+                  <span style={{
+                    fontSize: 10, padding: "3px 10px", borderRadius: 100,
                     background: `${severityColor(a.severity)}20`,
-                    color: severityColor(a.severity), fontWeight: 600 }}>{a.severity}</span>
+                    color: severityColor(a.severity), fontWeight: 700,
+                    letterSpacing: "0.04em", textTransform: "uppercase",
+                  }}>{a.severity}</span>
                 </div>
               ))
             }
@@ -871,7 +939,8 @@ export default function AdminDashboard({ user, onLogout }) {
               <div style={{
                 background: msg.startsWith("✅") ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
                 border: `1px solid ${msg.startsWith("✅") ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
-                borderRadius: 10, padding: "10px 16px", fontSize: 13,
+                borderLeft: `3px solid ${msg.startsWith("✅") ? "#22c55e" : "#ef4444"}`,
+                borderRadius: 10, padding: "11px 16px", fontSize: 13, fontWeight: 500,
                 color: msg.startsWith("✅") ? "#22c55e" : "#ef4444",
               }}>{msg}</div>
             )}
@@ -1204,7 +1273,7 @@ export default function AdminDashboard({ user, onLogout }) {
                       <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
                         <thead>
                           <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                            {["Photo","Étudiant","Classe / Année","Contact","Enrôlement","Présence","Absences","Moyenne","Compte","Actions"].map(h => (
+                            {["Étudiant","Classe / Année","Contact","Enrôlement","Présence","Absences","Moyenne","Compte","Actions"].map(h => (
                               <th key={h} style={{ padding: "10px 10px", textAlign: "left",
                                 color: "rgba(255,255,255,0.4)", fontSize: 11, whiteSpace: "nowrap" }}>{h}</th>
                             ))}
@@ -1218,18 +1287,6 @@ export default function AdminDashboard({ user, onLogout }) {
                             }}
                             onMouseEnter={e => e.currentTarget.style.background = "rgba(99,102,241,0.06)"}
                             onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                              {/* Photo */}
-                              <td style={{ padding: "10px 10px" }}>
-                                <div style={{ width: 38, height: 38, borderRadius: "50%",
-                                  background: "linear-gradient(135deg,#6366f1,#a855f7)",
-                                  overflow: "hidden", display: "flex", alignItems: "center",
-                                  justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
-                                  {s.photo_url
-                                    ? <img src={s.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                                    : "🎓"}
-                                </div>
-                              </td>
-
                               {/* Nom + date inscription */}
                               <td style={{ padding: "10px 10px" }}>
                                 <div style={{ fontWeight: 600, fontSize: 13 }}>{s.prenom} {s.nom}</div>
@@ -1272,11 +1329,11 @@ export default function AdminDashboard({ user, onLogout }) {
                               {/* Taux présence */}
                               <td style={{ padding: "10px 10px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <div style={{ width: 50, height: 5, background: "rgba(255,255,255,0.08)", borderRadius: 3 }}>
+                                  <div style={{ width: 52, height: 6, background: "rgba(255,255,255,0.07)", borderRadius: 100, overflow: "hidden" }}>
                                     <div style={{
-                                      width: `${s.taux_presence || 0}%`, height: "100%", borderRadius: 3,
-                                      background: (s.taux_presence || 0) >= 75 ? "#22c55e"
-                                        : (s.taux_presence || 0) >= 50 ? "#f59e0b" : "#ef4444",
+                                      width: `${s.taux_presence || 0}%`, height: "100%", borderRadius: 100,
+                                      background: (s.taux_presence || 0) >= 75 ? "linear-gradient(90deg,#16a34a,#22c55e)"
+                                        : (s.taux_presence || 0) >= 50 ? "linear-gradient(90deg,#d97706,#f59e0b)" : "linear-gradient(90deg,#dc2626,#ef4444)",
                                     }} />
                                   </div>
                                   <span style={{ fontSize: 12, fontWeight: 600,
@@ -1322,7 +1379,12 @@ export default function AdminDashboard({ user, onLogout }) {
 
                               {/* Actions */}
                               <td style={{ padding: "10px 10px" }} onClick={e => e.stopPropagation()}>
-                                <div style={{ display: "flex", gap: 5 }}>
+                                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                                  {/* Pas de compte : proposer création */}
+                                  {!s.has_account && s.is_enrolled && (
+                                    <Btn onClick={() => creerCompteEtudiant(s)} color="#0ea5e9"
+                                      style={{ padding: "4px 9px", fontSize: 11 }}>+ Compte</Btn>
+                                  )}
                                   {s.has_account && s.account_active && (
                                     <Btn onClick={() => deactivateEtudiant(s.id)} color="#ef4444"
                                       style={{ padding: "4px 9px", fontSize: 11 }}>Désactiver</Btn>
@@ -1342,6 +1404,110 @@ export default function AdminDashboard({ user, onLogout }) {
                     </div>
                   }
                 </Card>
+
+                {/* Comptes orphelins */}
+                {orphelins.length > 0 && (
+                  <Card style={{ borderTop: "2px solid #f59e0b" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(245,158,11,0.15)",
+                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>⚠️</div>
+                      <div>
+                        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Comptes sans profil</h2>
+                        <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                          Ces comptes ne sont liés à aucun profil étudiant. Supprimez-les ou liez-les manuellement.
+                        </p>
+                      </div>
+                    </div>
+                    {orphelins.map(o => (
+                      <div key={o.user_id} style={{
+                        padding: "12px 14px", marginBottom: 8,
+                        background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.2)",
+                        borderRadius: 10,
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                          <div style={{ flex: 1, minWidth: 160 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{o.prenom} {o.nom}</div>
+                            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{o.email}</div>
+                            <span style={{
+                              fontSize: 10, padding: "1px 7px", borderRadius: 100, fontWeight: 600,
+                              background: o.is_active ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                              color: o.is_active ? "#22c55e" : "#ef4444", marginTop: 4, display: "inline-block",
+                            }}>{o.is_active ? "Actif" : "Inactif"}</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <Btn onClick={() => { setProfilTarget(o); setLinkTarget(null); }}
+                              color="#22c55e" style={{ padding: "5px 10px", fontSize: 11 }}>
+                              ✚ Créer profil
+                            </Btn>
+                            <Btn onClick={() => { setLinkTarget(o); setProfilTarget(null); setLinkStudentId(""); }}
+                              color="#f59e0b" style={{ padding: "5px 10px", fontSize: 11 }}>
+                              🔗 Lier
+                            </Btn>
+                            <Btn onClick={() => deleteOrphelin(o.user_id)} color="#7f1d1d"
+                              style={{ padding: "5px 10px", fontSize: 11 }}>Supprimer</Btn>
+                          </div>
+                        </div>
+
+                        {/* Formulaire Créer profil */}
+                        {profilTarget?.user_id === o.user_id && (
+                          <div style={{
+                            marginTop: 10, paddingTop: 10,
+                            borderTop: "1px solid rgba(34,197,94,0.2)",
+                            display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                          }}>
+                            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>Classe :</span>
+                            <Select value={profilForm.classe}
+                              onChange={e => setProfilForm(f => ({ ...f, classe: e.target.value }))}
+                              style={{ width: 90, fontSize: 12, padding: "6px 8px" }}>
+                              {["1A","1B","1C","2A","2B","2C","3A","3B","3C"].map(c =>
+                                <option key={c} value={c}>{c}</option>)}
+                            </Select>
+                            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>Année :</span>
+                            <Select value={profilForm.annee_scolaire}
+                              onChange={e => setProfilForm(f => ({ ...f, annee_scolaire: e.target.value }))}
+                              style={{ width: 130, fontSize: 12, padding: "6px 8px" }}>
+                              {["2024-2025","2025-2026","2026-2027"].map(a =>
+                                <option key={a} value={a}>{a}</option>)}
+                            </Select>
+                            <Btn onClick={creerProfilOrphelin} color="#22c55e"
+                              style={{ padding: "6px 12px", fontSize: 12 }}>Confirmer</Btn>
+                            <Btn onClick={() => setProfilTarget(null)}
+                              color="rgba(255,255,255,0.08)"
+                              style={{ padding: "6px 12px", fontSize: 12, border: "1px solid rgba(255,255,255,0.1)" }}>
+                              Annuler
+                            </Btn>
+                          </div>
+                        )}
+
+                        {/* Formulaire de liaison inline */}
+                        {linkTarget?.user_id === o.user_id && (
+                          <div style={{
+                            marginTop: 10, paddingTop: 10,
+                            borderTop: "1px solid rgba(245,158,11,0.2)",
+                            display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                          }}>
+                            <Select value={linkStudentId} onChange={e => setLinkStudentId(e.target.value)}
+                              style={{ flex: 1, minWidth: 200, fontSize: 12, padding: "6px 10px" }}>
+                              <option value="">-- Choisir le profil étudiant --</option>
+                              {etudiants.map(s => (
+                                <option key={s.id} value={s.id}>
+                                  {s.prenom} {s.nom} — {s.classe} {s.has_account ? "(a déjà un compte)" : ""}
+                                </option>
+                              ))}
+                            </Select>
+                            <Btn onClick={lierCompteEtudiant} color="#22c55e"
+                              style={{ padding: "6px 12px", fontSize: 12 }}>Confirmer</Btn>
+                            <Btn onClick={() => { setLinkTarget(null); setLinkStudentId(""); }}
+                              color="rgba(255,255,255,0.08)"
+                              style={{ padding: "6px 12px", fontSize: 12, border: "1px solid rgba(255,255,255,0.1)" }}>
+                              Annuler
+                            </Btn>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </Card>
+                )}
               </div>
             )}
           </div>

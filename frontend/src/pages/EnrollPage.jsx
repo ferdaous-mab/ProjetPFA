@@ -29,11 +29,17 @@ export default function EnrollPage({ onGoToLogin, onGoHome }) {
         prenom:   credentials.prenom,
         role:     'etudiant',
       })
-      setStudentCode(code || '')
-      setDone(true)
     } catch (err) {
-      setError(err.response?.data?.detail || "Erreur lors de la creation du compte")
+      const detail = err.response?.data?.detail || ""
+      // "Email déjà utilisé" = compte existant (re-enrôlement) → ce n'est pas une erreur
+      if (!detail.toLowerCase().includes("email") && !detail.toLowerCase().includes("utilisé")) {
+        setError(detail || "Erreur lors de la creation du compte")
+        return
+      }
+      // Sinon : compte déjà présent → on continue vers le succès
     }
+    setStudentCode(code || '')
+    setDone(true)
   }
 
   if (done) {

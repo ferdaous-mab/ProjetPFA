@@ -95,6 +95,84 @@
   }
 }
 
+/* ────────────────── SmartCampus Visual Enhancements ────────────────── */
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 100px }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2) }
+
+/* Animations */
+@keyframes sc-spin {
+  from { transform: rotate(0deg) }
+  to   { transform: rotate(360deg) }
+}
+@keyframes sc-fade-up {
+  from { opacity: 0; transform: translateY(10px) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+
+/* Loading spinner */
+.sc-spinner {
+  width: 34px; height: 34px;
+  border: 3px solid rgba(255,255,255,0.07);
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: sc-spin 0.7s linear infinite;
+}
+.sc-spinner-cyan { border-top-color: #0ea5e9 }
+.sc-spinner-purple { border-top-color: #a855f7 }
+
+/* Content fade-in animation */
+.sc-fade { animation: sc-fade-up 0.28s ease }
+
+/* Card hover lift effect */
+.sc-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+.sc-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 44px rgba(0,0,0,0.3) !important;
+  border-color: rgba(255,255,255,0.15) !important;
+}
+
+/* Button hover */
+.sc-btn {
+  transition: filter 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease !important;
+}
+.sc-btn:hover { filter: brightness(1.15); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.3) }
+.sc-btn:active { transform: translateY(0); filter: brightness(0.94) }
+
+/* Input focus glow */
+.sc-input {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+.sc-input:focus {
+  border-color: rgba(99,102,241,0.5) !important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.09) !important;
+}
+
+/* Select focus glow */
+.sc-select {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+  appearance: none; -webkit-appearance: none;
+}
+.sc-select:focus {
+  border-color: rgba(99,102,241,0.5) !important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.09) !important;
+}
+
+/* Table row hover */
+.sc-tr { transition: background 0.13s ease }
+.sc-tr:hover { background: rgba(255,255,255,0.04) !important; cursor: pointer }
+
+/* Tab button smooth transition */
+.tab-btn { transition: color 0.18s ease, background 0.18s ease !important }
+
+/* Header elevated shadow */
+.app-header { box-shadow: 0 2px 20px rgba(0,0,0,0.4) !important }
+
 /* ── Legacy Vite styles below ───────────────────────────────────────── */
 .counter {
   font-size: 16px;

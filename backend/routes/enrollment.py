@@ -518,6 +518,22 @@ def finalize_enrollment(req: FinalizeRequest, db: Session = Depends(get_db)):
 
     del _sessions[req.session_id]
 
+    # ── Etape 4 : réactiver le compte si désactivé ────────────────────────────
+    if student:
+        from db.models import User as UserModel
+        existing_user = db.query(UserModel).filter(
+            UserModel.student_id == student.id
+        ).first()
+        if not existing_user:
+            existing_user = db.query(UserModel).filter(
+                UserModel.email == student.email
+            ).first()
+        if existing_user and not existing_user.is_active:
+            existing_user.is_active   = True
+            existing_user.student_id  = student.id
+            db.commit()
+            logger.info(f"[finalize] compte réactivé pour {student.email}")
+
     logger.info(
         f"[finalize] etudiant={student_id} angles={len(embeddings)} "
         f"images={uploaded} coherence={coherence:.3f} code={student_code}"
