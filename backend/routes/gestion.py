@@ -511,16 +511,9 @@ async def delete_etudiant(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Supprimer définitivement un étudiant et son compte utilisateur lié."""
-    # Supprimer le compte User lié (évite les comptes orphelins)
-    linked_user = db.query(User).filter(User.student_id == student_id).first()
-    if linked_user:
-        db.delete(linked_user)
-        db.flush()
-
+    """Supprimer définitivement un étudiant (le compte lié est supprimé automatiquement via CASCADE)."""
     success = delete_student(db, student_id)
     if not success:
-        db.rollback()
         raise HTTPException(status_code=404, detail="Étudiant introuvable")
     return {"success": True, "message": "Étudiant et compte supprimés"}
 
@@ -695,3 +688,216 @@ async def lier_compte_etudiant(
         user.is_active = True
     db.commit()
     return {"success": True, "message": f"Compte {user.email} lié à {student.prenom} {student.nom}"}
+
+
+# ── NOTES ─────────────────────────────────────────────────────────────────────
+
+class NoteCreate(BaseModel):
+    student_id:  str
+    matiere_id:  str
+    note:        float
+    type:        str = "controle"   # controle | examen | tp
+    commentaire: Optional[str] = None
+    date:        Optional[str] = None   # "YYYY-MM-DD"
+
+
+class NoteUpdate(BaseModel):
+    note:        Optional[float] = None
+    type:        Optional[str]   = None
+    commentaire: Optional[str]   = None
+
+
+@router.get("/gestion/notes")
+async def get_notes(
+    classe:     Optional[str] = None,
+    student_id: Optional[str] = None,
+    matiere_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Liste toutes les notes, filtrables par classe / étudiant / matière."""
+    q = db.query(Grade)
+    if student_id:
+        q = q.filter(Grade.student_id == student_id)
+    if matiere_id:
+        q = q.filter(Grade.matiere_id == matiere_id)
+
+    grades = q.order_by(Grade.created_at.desc()).all()
+    result = []
+    for g in grades:
+        student = db.query(Student).filter(Student.id == g.student_id).first()
+        matiere = db.query(Matiere).filter(Matiere.id == g.matiere_id).first()
+        if classe and (not student or student.classe != classe):
+            continue
+        result.append({
+            "id":          str(g.id),
+            "student_id":  str(g.student_id),
+            "etudiant":    f"{student.prenom} {student.nom}" if student else "?",
+            "classe":      student.classe if student else "?",
+            "matiere_id":  str(g.matiere_id),
+            "matiere":     matiere.nom if matiere else "?",
+            "note":        g.note,
+            "type":        g.type,
+            "commentaire": g.commentaire,
+            "date":        str(g.date),
+        })
+    return result
+
+
+@router.post("/gestion/notes")
+async def add_note(
+    req: NoteCreate,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Ajouter une note pour un étudiant."""
+    from datetime import date as date_type
+    grade = Grade(
+        student_id  = req.student_id,
+        matiere_id  = req.matiere_id,
+        note        = req.note,
+        type        = req.type,
+        commentaire = req.commentaire,
+        date        = date_type.fromisoformat(req.date) if req.date else date_type.today(),
+    )
+    db.add(grade)
+    db.commit()
+    return {"success": True, "id": str(grade.id)}
+
+
+@router.put("/gestion/notes/{note_id}")
+async def update_note(
+    note_id: str,
+    req: NoteUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Modifier une note."""
+    grade = db.query(Grade).filter(Grade.id == note_id).first()
+    if not grade:
+        raise HTTPException(status_code=404, detail="Note introuvable")
+    if req.note        is not None: grade.note        = req.note
+    if req.type        is not None: grade.type        = req.type
+    if req.commentaire is not None: grade.commentaire = req.commentaire
+    db.commit()
+    return {"success": True}
+
+
+@router.delete("/gestion/notes/{note_id}")
+async def delete_note(
+    note_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Supprimer une note."""
+    grade = db.query(Grade).filter(Grade.id == note_id).first()
+    if not grade:
+        raise HTTPException(status_code=404, detail="Note introuvable")
+    db.delete(grade)
+    db.commit()
+    return {"success": True}
+
+
+# ── ALERTES MANUELLES ─────────────────────────────────────────────────────────
+
+class AlerteManuelle(BaseModel):
+    message:     str
+    type:        str = "information"   # information | avertissement | convocation
+    severity:    str = "low"           # low | medium | high
+    student_id:  Optional[str] = None  # cibler un étudiant précis
+    classe:      Optional[str] = None  # cibler toute une classe
+    target_role: str = "etudiant"
+
+
+@router.post("/gestion/alertes")
+async def creer_alerte_manuelle(
+    req: AlerteManuelle,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Créer une alerte manuelle pour un étudiant ou tous les étudiants d'une classe."""
+    if not req.student_id and not req.classe:
+        raise HTTPException(status_code=400, detail="Fournir un student_id ou une classe")
+
+    targets = []
+    if req.student_id:
+        s = db.query(Student).filter(Student.id == req.student_id).first()
+        if not s:
+            raise HTTPException(status_code=404, detail="Étudiant introuvable")
+        targets = [s]
+    else:
+        targets = db.query(Student).filter(Student.classe == req.classe).all()
+        if not targets:
+            raise HTTPException(status_code=404, detail="Aucun étudiant dans cette classe")
+
+    for s in targets:
+        alerte = Alert(
+            student_id  = s.id,
+            type        = req.type,
+            message     = req.message,
+            severity    = req.severity,
+            target_role = req.target_role,
+            is_read     = False,
+        )
+        db.add(alerte)
+
+    db.commit()
+    return {"success": True, "nb_alertes": len(targets)}
+
+
+# ── SESSIONS ──────────────────────────────────────────────────────────────────
+
+@router.get("/gestion/sessions")
+async def get_sessions(
+    classe:    Optional[str] = None,
+    matiere_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Liste toutes les séances de cours."""
+    from db.models import Session as SessionModel
+    q = db.query(SessionModel)
+    if classe:
+        q = q.filter(SessionModel.classe == classe)
+    if matiere_id:
+        q = q.filter(SessionModel.matiere_id == matiere_id)
+
+    sessions = q.order_by(SessionModel.date.desc()).all()
+    result = []
+    for s in sessions:
+        matiere = db.query(Matiere).filter(Matiere.id == s.matiere_id).first()
+        total   = db.query(Attendance).filter(Attendance.session_id == s.id).count()
+        present = db.query(Attendance).filter(
+            Attendance.session_id == s.id, Attendance.status == "present"
+        ).count()
+        result.append({
+            "id":          str(s.id),
+            "matiere":     matiere.nom if matiere else "?",
+            "matiere_id":  str(s.matiere_id),
+            "classe":      s.classe,
+            "date":        str(s.date),
+            "heure_debut": str(s.heure_debut) if s.heure_debut else None,
+            "heure_fin":   str(s.heure_fin)   if s.heure_fin   else None,
+            "salle":       s.salle,
+            "status":      s.status,
+            "total_att":   total,
+            "present":     present,
+            "taux":        round(present / total * 100, 1) if total else 0,
+        })
+    return result
+
+
+@router.delete("/gestion/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Supprimer une séance (et ses présences via CASCADE)."""
+    from db.models import Session as SessionModel
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Séance introuvable")
+    db.delete(session)
+    db.commit()
+    return {"success": True}

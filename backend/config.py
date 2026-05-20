@@ -43,10 +43,23 @@ def get_db():
 
 
 def init_db():
-    """Créer toutes les tables + activer pgvector."""
+    """Créer toutes les tables + activer pgvector + appliquer migrations."""
     from db.models import Base
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        # Migration : ON DELETE SET NULL → CASCADE sur users.student_id
+        # N'affecte pas les données existantes, seulement les futures suppressions.
+        # Idempotent : peut être relancé sans risque.
+        try:
+            conn.execute(text(
+                "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_student_id_fkey"
+            ))
+            conn.execute(text(
+                "ALTER TABLE users ADD CONSTRAINT users_student_id_fkey "
+                "FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE"
+            ))
+        except Exception:
+            conn.rollback()
         conn.commit()
     Base.metadata.create_all(bind=engine)
-    print("Tables créées avec succès ✅")
+    print("DB initialisée ✅")

@@ -111,7 +111,7 @@ class User(Base):
     email         = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role          = Column(String(20), nullable=False)
-    student_id    = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="SET NULL"), nullable=True)
+    student_id    = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=True)
     nom           = Column(String, nullable=False)
     prenom        = Column(String, nullable=False)
     is_active     = Column(Boolean, default=True)

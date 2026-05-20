@@ -54,21 +54,18 @@ def get_current_user(
             detail="Utilisateur introuvable ou désactivé"
         )
 
-    # Auto-réparer : si un compte étudiant a perdu son student_id (ON DELETE SET NULL
-    # ou bug d'insertion), retrouver l'étudiant par email et rétablir le lien.
+    # Auto-réparer : si un compte étudiant a perdu son student_id,
+    # retrouver le Student par email et rétablir le lien.
     if user.role == "etudiant" and not user.student_id:
-        logger.warning(f"[auto-repair] user_id={user.id} email={user.email} — student_id manquant, recherche par email...")
         from db.models import Student
         from sqlalchemy import func
         student = db.query(Student).filter(
             func.lower(Student.email) == func.lower(user.email)
         ).first()
-        logger.warning(f"[auto-repair] student trouvé: {student is not None} (id={student.id if student else 'N/A'})")
         if student:
             user.student_id = student.id
             db.commit()
             db.refresh(user)
-            logger.warning(f"[auto-repair] student_id rétabli: {user.student_id}")
 
     return user
 

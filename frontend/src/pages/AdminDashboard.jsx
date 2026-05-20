@@ -159,11 +159,33 @@ export default function AdminDashboard({ user, onLogout }) {
   const [orphelins,     setOrphelins]     = useState([]);
   const [linkTarget,    setLinkTarget]    = useState(null);
   const [linkStudentId, setLinkStudentId] = useState("");
-  const [profilTarget,  setProfilTarget]  = useState(null);  // user pour "Créer profil"
+  const [profilTarget,  setProfilTarget]  = useState(null);
   const [profilForm,    setProfilForm]    = useState({ classe: "1A", annee_scolaire: "2025-2026" });
+
+  // Recherche / filtres étudiants
+  const [searchEtudiant, setSearchEtudiant] = useState("");
+  const [filterClasse,   setFilterClasse]   = useState("");
+  const [filterStatut,   setFilterStatut]   = useState("");
+
+  // Notes
+  const [notes,    setNotes]    = useState([]);
+  const [formNote, setFormNote] = useState({ student_id:"", matiere_id:"", note:"", type:"controle", commentaire:"", date:"" });
+  const [editNote, setEditNote] = useState(null);
+  const [noteMsg,  setNoteMsg]  = useState("");
+
+  // Sessions
+  const [sessions,       setSessions]       = useState([]);
+  const [filterSClasse,  setFilterSClasse]  = useState("");
+  const [filterSMatiere, setFilterSMatiere] = useState("");
+
+  // Alertes manuelles
+  const [formAlerte, setFormAlerte] = useState({ message:"", type:"information", severity:"medium", cible:"etudiant", student_id:"", classe:"" });
+  const [alerteMsg,  setAlerteMsg]  = useState("");
 
   useEffect(() => { loadBI(); }, []);
   useEffect(() => { if (activeTab === "gestion") loadGestion(); }, [activeTab]);
+  useEffect(() => { if (activeTab === "gestion" && gTab === "notes")    loadNotes();    }, [gTab]);
+  useEffect(() => { if (activeTab === "gestion" && gTab === "sessions") loadSessions(); }, [gTab]);
 
   const loadBI = async () => {
     setLoading(true);
@@ -376,6 +398,117 @@ export default function AdminDashboard({ user, onLogout }) {
     loadGestion();
   };
 
+  // ── Notes ──
+  const loadNotes = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/api/gestion/notes`, authHeaders());
+      setNotes(res.data);
+    } catch {}
+  };
+
+  const addNote = async () => {
+    if (!formNote.student_id || !formNote.matiere_id || formNote.note === "") return;
+    try {
+      await axios.post(`${API_URL}/api/gestion/notes`, {
+        ...formNote, note: parseFloat(formNote.note),
+      }, authHeaders());
+      setNoteMsg("ok");
+      setFormNote({ student_id:"", matiere_id:"", note:"", type:"controle", commentaire:"", date:"" });
+      loadNotes();
+    } catch (e) { setNoteMsg("err:" + (e.response?.data?.detail || "Erreur")); }
+    finally { setTimeout(() => setNoteMsg(""), 3000); }
+  };
+
+  const saveEditNote = async () => {
+    if (!editNote) return;
+    try {
+      await axios.put(`${API_URL}/api/gestion/notes/${editNote.id}`,
+        { note: parseFloat(editNote.note), type: editNote.type, commentaire: editNote.commentaire },
+        authHeaders()
+      );
+      setNoteMsg("ok");
+      setEditNote(null);
+      loadNotes();
+    } catch (e) { setNoteMsg("err:" + (e.response?.data?.detail || "Erreur")); }
+    finally { setTimeout(() => setNoteMsg(""), 3000); }
+  };
+
+  const deleteNote = async (id) => {
+    if (!confirm("Supprimer cette note ?")) return;
+    await axios.delete(`${API_URL}/api/gestion/notes/${id}`, authHeaders());
+    loadNotes();
+  };
+
+  // ── Sessions ──
+  const loadSessions = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/api/gestion/sessions`, authHeaders());
+      setSessions(res.data);
+    } catch {}
+  };
+
+  const deleteSession = async (id) => {
+    if (!confirm("Supprimer cette séance et toutes ses présences ?")) return;
+    await axios.delete(`${API_URL}/api/gestion/sessions/${id}`, authHeaders());
+    showMsg("✅ Séance supprimée");
+    loadSessions();
+  };
+
+  // ── Alertes manuelles ──
+  const sendAlerte = async () => {
+    if (!formAlerte.message.trim()) return;
+    if (formAlerte.cible === "etudiant" && !formAlerte.student_id) return;
+    if (formAlerte.cible === "classe"   && !formAlerte.classe)     return;
+    try {
+      const payload = {
+        message:  formAlerte.message,
+        type:     formAlerte.type,
+        severity: formAlerte.severity,
+        ...(formAlerte.cible === "etudiant"
+          ? { student_id: formAlerte.student_id }
+          : { classe: formAlerte.classe }),
+      };
+      const res = await axios.post(`${API_URL}/api/gestion/alertes`, payload, authHeaders());
+      setAlerteMsg(`ok:${res.data.nb_alertes}`);
+      setFormAlerte({ message:"", type:"information", severity:"medium", cible:"etudiant", student_id:"", classe:"" });
+    } catch (e) { setAlerteMsg("err:" + (e.response?.data?.detail || "Erreur")); }
+    finally { setTimeout(() => setAlerteMsg(""), 4000); }
+  };
+
+  // ── Export CSV ──
+  const exportCSV = (rows, cols, filename) => {
+    const header = cols.map(c => c.label).join(";");
+    const body   = rows.map(r => cols.map(c => `"${(r[c.key] ?? "").toString().replace(/"/g, '""')}"`).join(";")).join("\n");
+    const blob   = new Blob(["﻿" + header + "\n" + body], { type: "text/csv;charset=utf-8;" });
+    const url    = URL.createObjectURL(blob);
+    const a      = document.createElement("a"); a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportEtudiants = () => exportCSV(etudiants, [
+    { label: "Nom",           key: "nom" },
+    { label: "Prénom",        key: "prenom" },
+    { label: "Email",         key: "email" },
+    { label: "Classe",        key: "classe" },
+    { label: "Année scolaire",key: "annee_scolaire" },
+    { label: "Tél.",          key: "telephone" },
+    { label: "CIN",           key: "cin" },
+    { label: "Présence %",    key: "taux_presence" },
+    { label: "Absences",      key: "absences" },
+    { label: "Moyenne",       key: "moyenne" },
+    { label: "Enrôlé",        key: "is_enrolled" },
+  ], "etudiants.csv");
+
+  const exportNotes = () => exportCSV(notes, [
+    { label: "Étudiant",   key: "etudiant" },
+    { label: "Classe",     key: "classe" },
+    { label: "Matière",    key: "matiere" },
+    { label: "Note",       key: "note" },
+    { label: "Type",       key: "type" },
+    { label: "Date",       key: "date" },
+    { label: "Commentaire",key: "commentaire" },
+  ], "notes.csv");
+
   const tabs = [
     { id: "overview",  label: "Vue d'ensemble", icon: "📊" },
     { id: "presences", label: "Présences",       icon: "✅" },
@@ -390,7 +523,21 @@ export default function AdminDashboard({ user, onLogout }) {
     { id: "matieres",  label: "Matières",        icon: "📚" },
     { id: "emplois",   label: "Emploi du temps", icon: "📅" },
     { id: "etudiants", label: "Étudiants",       icon: "🎓" },
+    { id: "notes",     label: "Notes",           icon: "📝" },
+    { id: "alertes",   label: "Alertes",         icon: "🔔" },
+    { id: "sessions",  label: "Sessions",        icon: "🎬" },
   ];
+
+  const etudiantsFiltres = etudiants.filter(e => {
+    const q = searchEtudiant.toLowerCase();
+    const matchSearch = !q || `${e.prenom} ${e.nom} ${e.email}`.toLowerCase().includes(q);
+    const matchClasse = !filterClasse || e.classe === filterClasse;
+    const matchStatut = !filterStatut
+      || (filterStatut === "actif"       && e.has_account  && e.account_active)
+      || (filterStatut === "inactif"     && e.has_account  && !e.account_active)
+      || (filterStatut === "sans_compte" && !e.has_account);
+    return matchSearch && matchClasse && matchStatut;
+  });
 
   const severityColor = s =>
     s === "high" ? "#ef4444" : s === "medium" ? "#f59e0b" : "#6366f1";
@@ -1267,8 +1414,27 @@ export default function AdminDashboard({ user, onLogout }) {
                 </div>
 
                 <Card>
-                  <SectionTitle title={`Étudiants (${etudiants.length})`} icon="🎓" />
-                  {etudiants.length === 0 ? <EmptyState message="Aucun étudiant" /> :
+                  {/* Barre de recherche + filtres + export */}
+                  <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+                    <Input placeholder="🔍 Rechercher par nom, prénom, email..." value={searchEtudiant}
+                      onChange={e => setSearchEtudiant(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+                    <Select value={filterClasse} onChange={e => setFilterClasse(e.target.value)} style={{ width: 110 }}>
+                      <option value="">Toutes classes</option>
+                      {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </Select>
+                    <Select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ width: 140 }}>
+                      <option value="">Tous statuts</option>
+                      <option value="actif">Compte actif</option>
+                      <option value="inactif">Compte inactif</option>
+                      <option value="sans_compte">Sans compte</option>
+                    </Select>
+                    <Btn onClick={exportEtudiants} color="rgba(34,197,94,0.2)"
+                      style={{ border: "1px solid rgba(34,197,94,0.4)", color: "#22c55e", padding: "8px 14px", fontSize: 12, flexShrink: 0 }}>
+                      ⬇ CSV
+                    </Btn>
+                  </div>
+                  <SectionTitle title={`Étudiants (${etudiantsFiltres.length}${etudiantsFiltres.length !== etudiants.length ? ` / ${etudiants.length}` : ""})`} icon="🎓" />
+                  {etudiantsFiltres.length === 0 ? <EmptyState message="Aucun étudiant trouvé" /> :
                     <div style={{ overflowX: "auto" }}>
                       <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
                         <thead>
@@ -1280,7 +1446,7 @@ export default function AdminDashboard({ user, onLogout }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {etudiants.map((s, i) => (
+                          {etudiantsFiltres.map((s, i) => (
                             <tr key={i} onClick={() => openEtudiant(s)} style={{
                               borderBottom: "1px solid rgba(255,255,255,0.04)",
                               cursor: "pointer", transition: "background 0.15s",
@@ -1510,6 +1676,330 @@ export default function AdminDashboard({ user, onLogout }) {
                 )}
               </div>
             )}
+
+            {/* ── Notes ── */}
+            {gTab === "notes" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+                {/* Formulaire ajout / édition */}
+                <Card>
+                  <SectionTitle title={editNote ? "Modifier la note" : "Saisir une note"} icon={editNote ? "✏️" : "➕"} />
+                  {noteMsg && (
+                    <div style={{
+                      marginBottom: 12, padding: "10px 14px", borderRadius: 9, fontSize: 13, fontWeight: 500,
+                      background: noteMsg === "ok" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+                      border: `1px solid ${noteMsg === "ok" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                      color: noteMsg === "ok" ? "#22c55e" : "#ef4444",
+                    }}>
+                      {noteMsg === "ok" ? "✅ Note enregistrée !" : noteMsg.replace("err:", "")}
+                    </div>
+                  )}
+                  {editNote ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ padding: "10px 14px", background: "rgba(99,102,241,0.08)",
+                        borderRadius: 10, fontSize: 13, color: "rgba(255,255,255,0.6)" }}>
+                        {editNote.etudiant} — {editNote.matiere} ({editNote.classe})
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                        <Input placeholder="Note /20" type="number" value={editNote.note}
+                          onChange={e => setEditNote(n => ({...n, note: e.target.value}))} />
+                        <Select value={editNote.type} onChange={e => setEditNote(n => ({...n, type: e.target.value}))}>
+                          <option value="controle">Contrôle</option>
+                          <option value="examen">Examen</option>
+                          <option value="tp">TP</option>
+                        </Select>
+                        <Input placeholder="Commentaire (optionnel)" value={editNote.commentaire || ""}
+                          onChange={e => setEditNote(n => ({...n, commentaire: e.target.value}))} />
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Btn onClick={saveEditNote} style={{ flex: 1 }}>💾 Enregistrer</Btn>
+                        <Btn onClick={() => setEditNote(null)} color="rgba(255,255,255,0.06)"
+                          style={{ padding: "9px 18px", color: "rgba(255,255,255,0.5)" }}>Annuler</Btn>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                        <Select value={formNote.student_id}
+                          onChange={e => setFormNote(f => ({...f, student_id: e.target.value}))}>
+                          <option value="">-- Étudiant --</option>
+                          {etudiants.map(s => (
+                            <option key={s.id} value={s.id}>{s.prenom} {s.nom} ({s.classe})</option>
+                          ))}
+                        </Select>
+                        <Select value={formNote.matiere_id}
+                          onChange={e => setFormNote(f => ({...f, matiere_id: e.target.value}))}>
+                          <option value="">-- Matière --</option>
+                          {matieres.map(m => (
+                            <option key={m.id} value={m.id}>{m.nom} ({m.classe})</option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+                        <Input placeholder="Note /20" type="number" min="0" max="20" step="0.25"
+                          value={formNote.note}
+                          onChange={e => setFormNote(f => ({...f, note: e.target.value}))} />
+                        <Select value={formNote.type}
+                          onChange={e => setFormNote(f => ({...f, type: e.target.value}))}>
+                          <option value="controle">Contrôle</option>
+                          <option value="examen">Examen</option>
+                          <option value="tp">TP</option>
+                        </Select>
+                        <Input placeholder="Date (YYYY-MM-DD)" value={formNote.date}
+                          onChange={e => setFormNote(f => ({...f, date: e.target.value}))} />
+                        <Input placeholder="Commentaire" value={formNote.commentaire}
+                          onChange={e => setFormNote(f => ({...f, commentaire: e.target.value}))} />
+                      </div>
+                      <Btn onClick={addNote}
+                        style={{ opacity: (!formNote.student_id || !formNote.matiere_id || formNote.note === "") ? 0.5 : 1 }}>
+                        ➕ Ajouter la note
+                      </Btn>
+                    </div>
+                  )}
+                </Card>
+
+                {/* Liste des notes */}
+                <Card>
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+                    <SectionTitle title={`Notes saisies (${notes.length})`} icon="📋" />
+                    <Btn onClick={exportNotes} color="rgba(34,197,94,0.2)"
+                      style={{ marginLeft: "auto", border: "1px solid rgba(34,197,94,0.4)", color: "#22c55e", padding: "6px 12px", fontSize: 11 }}>
+                      ⬇ CSV
+                    </Btn>
+                  </div>
+                  {notes.length === 0 ? <EmptyState message="Aucune note saisie" /> : (
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                            {["Étudiant","Classe","Matière","Note","Type","Date","Commentaire","Actions"].map(h => (
+                              <th key={h} style={{ padding: "8px 10px", textAlign: "left",
+                                color: "rgba(255,255,255,0.4)", fontSize: 11 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {notes.map((n, i) => (
+                            <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                              <td style={{ padding: "9px 10px", fontSize: 13, fontWeight: 500 }}>{n.etudiant}</td>
+                              <td style={{ padding: "9px 10px" }}>
+                                <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
+                                  padding: "2px 7px", borderRadius: 5, fontSize: 11 }}>{n.classe}</span>
+                              </td>
+                              <td style={{ padding: "9px 10px", fontSize: 13 }}>{n.matiere}</td>
+                              <td style={{ padding: "9px 10px", fontWeight: 700, fontSize: 15,
+                                color: n.note >= 10 ? "#22c55e" : "#ef4444" }}>{n.note}/20</td>
+                              <td style={{ padding: "9px 10px", fontSize: 12,
+                                color: "rgba(255,255,255,0.5)" }}>{n.type}</td>
+                              <td style={{ padding: "9px 10px", fontSize: 12,
+                                color: "rgba(255,255,255,0.4)" }}>{n.date}</td>
+                              <td style={{ padding: "9px 10px", fontSize: 12,
+                                color: "rgba(255,255,255,0.4)", maxWidth: 160,
+                                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {n.commentaire || "—"}
+                              </td>
+                              <td style={{ padding: "9px 10px" }}>
+                                <div style={{ display: "flex", gap: 5 }}>
+                                  <Btn onClick={() => setEditNote(n)} color="rgba(99,102,241,0.2)"
+                                    style={{ padding: "4px 9px", fontSize: 11, border: "1px solid rgba(99,102,241,0.4)", color: "#a5b4fc" }}>
+                                    Modifier
+                                  </Btn>
+                                  <Btn onClick={() => deleteNote(n.id)} color="#ef4444"
+                                    style={{ padding: "4px 9px", fontSize: 11 }}>Supprimer</Btn>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </Card>
+              </div>
+            )}
+
+            {/* ── Alertes manuelles ── */}
+            {gTab === "alertes" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                <Card>
+                  <SectionTitle title="Envoyer une alerte" icon="📣" />
+                  {alerteMsg && (
+                    <div style={{
+                      marginBottom: 14, padding: "11px 16px", borderRadius: 9, fontSize: 13, fontWeight: 500,
+                      background: alerteMsg.startsWith("ok") ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+                      border: `1px solid ${alerteMsg.startsWith("ok") ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                      color: alerteMsg.startsWith("ok") ? "#22c55e" : "#ef4444",
+                    }}>
+                      {alerteMsg.startsWith("ok")
+                        ? `✅ Alerte envoyée à ${alerteMsg.split(":")[1]} étudiant(s) !`
+                        : alerteMsg.replace("err:", "")}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {/* Cible */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <Select value={formAlerte.cible}
+                        onChange={e => setFormAlerte(f => ({...f, cible: e.target.value, student_id: "", classe: ""}))}>
+                        <option value="etudiant">Étudiant précis</option>
+                        <option value="classe">Toute une classe</option>
+                      </Select>
+                      {formAlerte.cible === "etudiant" ? (
+                        <Select value={formAlerte.student_id}
+                          onChange={e => setFormAlerte(f => ({...f, student_id: e.target.value}))}>
+                          <option value="">-- Choisir un étudiant --</option>
+                          {etudiants.map(s => (
+                            <option key={s.id} value={s.id}>{s.prenom} {s.nom} ({s.classe})</option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Select value={formAlerte.classe}
+                          onChange={e => setFormAlerte(f => ({...f, classe: e.target.value}))}>
+                          <option value="">-- Choisir une classe --</option>
+                          {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </Select>
+                      )}
+                    </div>
+                    {/* Type + Sévérité */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <Select value={formAlerte.type}
+                        onChange={e => setFormAlerte(f => ({...f, type: e.target.value}))}>
+                        <option value="information">Information</option>
+                        <option value="avertissement">Avertissement</option>
+                        <option value="convocation">Convocation</option>
+                        <option value="absences_excessives">Absences excessives</option>
+                        <option value="notes_faibles">Notes faibles</option>
+                      </Select>
+                      <Select value={formAlerte.severity}
+                        onChange={e => setFormAlerte(f => ({...f, severity: e.target.value}))}>
+                        <option value="low">🟢 Faible</option>
+                        <option value="medium">🟡 Moyen</option>
+                        <option value="high">🔴 Urgent</option>
+                      </Select>
+                    </div>
+                    {/* Message */}
+                    <textarea value={formAlerte.message}
+                      onChange={e => setFormAlerte(f => ({...f, message: e.target.value}))}
+                      placeholder="Message de l'alerte..."
+                      rows={4}
+                      style={{
+                        width: "100%", padding: "10px 14px", boxSizing: "border-box",
+                        background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: 10, color: "#fff", fontSize: 13,
+                        fontFamily: "Sora, sans-serif", outline: "none", resize: "vertical",
+                      }} />
+                    <Btn onClick={sendAlerte}
+                      style={{
+                        opacity: (!formAlerte.message.trim() ||
+                          (formAlerte.cible === "etudiant" && !formAlerte.student_id) ||
+                          (formAlerte.cible === "classe"   && !formAlerte.classe)) ? 0.5 : 1,
+                      }}>
+                      📣 Envoyer l'alerte
+                    </Btn>
+                  </div>
+                </Card>
+
+                {/* Info */}
+                <div style={{ padding: "12px 16px", background: "rgba(99,102,241,0.06)",
+                  border: "1px solid rgba(99,102,241,0.2)", borderRadius: 12,
+                  fontSize: 12, color: "rgba(255,255,255,0.4)", lineHeight: 1.7 }}>
+                  ℹ️ Les alertes envoyées apparaissent dans l'onglet <strong style={{ color: "#a5b4fc" }}>Alertes</strong> du dashboard étudiant.
+                  L'étudiant peut les marquer comme lues.
+                </div>
+              </div>
+            )}
+
+            {/* ── Sessions ── */}
+            {gTab === "sessions" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {/* Filtres */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Select value={filterSClasse} onChange={e => setFilterSClasse(e.target.value)} style={{ width: 130 }}>
+                    <option value="">Toutes classes</option>
+                    {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </Select>
+                  <Select value={filterSMatiere} onChange={e => setFilterSMatiere(e.target.value)} style={{ flex: 1, minWidth: 180 }}>
+                    <option value="">Toutes matières</option>
+                    {matieres.map(m => <option key={m.id} value={m.id}>{m.nom} ({m.classe})</option>)}
+                  </Select>
+                  <Btn onClick={() => {
+                    let url = `${API_URL}/api/gestion/sessions?`;
+                    if (filterSClasse)  url += `classe=${filterSClasse}&`;
+                    if (filterSMatiere) url += `matiere_id=${filterSMatiere}`;
+                    axios.get(url, authHeaders()).then(r => setSessions(r.data));
+                  }} color="rgba(99,102,241,0.2)"
+                    style={{ border: "1px solid rgba(99,102,241,0.4)", color: "#a5b4fc", padding: "9px 16px", fontSize: 13 }}>
+                    Filtrer
+                  </Btn>
+                  <Btn onClick={loadSessions} color="rgba(255,255,255,0.06)"
+                    style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", padding: "9px 14px", fontSize: 13 }}>
+                    Réinitialiser
+                  </Btn>
+                </div>
+
+                <Card>
+                  <SectionTitle title={`Séances (${sessions.length})`} icon="🎬" />
+                  {sessions.length === 0 ? <EmptyState message="Aucune séance" /> : (
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                            {["Date","Matière","Classe","Horaire","Salle","Statut","Présence","Actions"].map(h => (
+                              <th key={h} style={{ padding: "8px 10px", textAlign: "left",
+                                color: "rgba(255,255,255,0.4)", fontSize: 11 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessions.map((s, i) => {
+                            const statColor = s.status === "terminee" ? "#22c55e" : s.status === "en_cours" ? "#f59e0b" : "#6366f1";
+                            return (
+                              <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                                <td style={{ padding: "9px 10px", fontSize: 13, fontWeight: 500 }}>{s.date}</td>
+                                <td style={{ padding: "9px 10px", fontSize: 13 }}>{s.matiere}</td>
+                                <td style={{ padding: "9px 10px" }}>
+                                  <span style={{ background: "rgba(99,102,241,0.15)", color: "#6366f1",
+                                    padding: "2px 7px", borderRadius: 5, fontSize: 11 }}>{s.classe}</span>
+                                </td>
+                                <td style={{ padding: "9px 10px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+                                  {s.heure_debut ? `${s.heure_debut.slice(0,5)} → ${(s.heure_fin||"").slice(0,5)}` : "—"}
+                                </td>
+                                <td style={{ padding: "9px 10px", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                                  {s.salle || "—"}
+                                </td>
+                                <td style={{ padding: "9px 10px" }}>
+                                  <span style={{ background: `${statColor}20`, color: statColor,
+                                    padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
+                                    {s.status}
+                                  </span>
+                                </td>
+                                <td style={{ padding: "9px 10px" }}>
+                                  {s.total_att > 0 ? (
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                      <div style={{ width: 44, height: 5, background: "rgba(255,255,255,0.08)", borderRadius: 3 }}>
+                                        <div style={{ width: `${s.taux}%`, height: "100%",
+                                          background: s.taux >= 75 ? "#22c55e" : "#ef4444", borderRadius: 3 }} />
+                                      </div>
+                                      <span style={{ fontSize: 12, color: s.taux >= 75 ? "#22c55e" : "#ef4444", fontWeight: 600 }}>
+                                        {s.taux}%
+                                      </span>
+                                    </div>
+                                  ) : <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>—</span>}
+                                </td>
+                                <td style={{ padding: "9px 10px" }}>
+                                  <Btn onClick={() => deleteSession(s.id)} color="#ef4444"
+                                    style={{ padding: "4px 9px", fontSize: 11 }}>Supprimer</Btn>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </Card>
+              </div>
+            )}
+
           </div>
         )}
       </div>
