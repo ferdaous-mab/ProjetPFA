@@ -888,7 +888,7 @@ export default function AdminDashboard({ user, onLogout }) {
 
             {/* Professeurs */}
             {gTab === "profs" && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 <Card>
                   <SectionTitle title="Ajouter un professeur" icon="➕" />
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1000,7 +1000,7 @@ export default function AdminDashboard({ user, onLogout }) {
 
             {/* Matières */}
             {gTab === "matieres" && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 <Card>
                   <SectionTitle title="Ajouter une matière" icon="➕" />
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

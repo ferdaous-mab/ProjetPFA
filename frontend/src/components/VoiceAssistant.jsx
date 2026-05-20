@@ -115,11 +115,16 @@ export default function VoiceAssistant({
   // ── AssemblyAI fallback ──────────────────────────────────────────────────────
   const startAssemblyAI = async () => {
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setError("Le microphone nécessite HTTPS ou localhost — accès bloqué en HTTP");
+        setS("idle");
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl:  true,  // le navigateur calibre le gain automatiquement
+          autoGainControl:  true,
         }
       });
 
@@ -155,7 +160,13 @@ export default function VoiceAssistant({
       mediaRecorder.current.start(100);
       setLiveTranscript(""); // micro prêt
     } catch (e) {
-      setError("Microphone inaccessible — " + (e.message || "vérifiez les permissions"));
+      if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
+        setError("Microphone bloqué — cliquez sur 🔒 dans la barre d'adresse et autorisez le microphone");
+      } else if (e.name === "NotFoundError") {
+        setError("Aucun microphone détecté sur cet appareil");
+      } else {
+        setError("Microphone inaccessible — " + (e.name || e.message || "erreur inconnue"));
+      }
       setS("idle");
     }
   };
@@ -227,7 +238,10 @@ export default function VoiceAssistant({
       }
       if (event.error === "no-speech" || event.error === "aborted") return;
       if (event.error === "not-allowed") {
-        setError("Microphone refusé — autorisez l'accès dans les paramètres du navigateur");
+        usingFallback.current = true;
+        setLiveTranscript("⏳ Connexion micro directe...");
+        setTimeout(() => startAssemblyAI(), 500);
+        return;
       } else {
         setError("Erreur micro : " + event.error);
       }
@@ -471,7 +485,7 @@ export default function VoiceAssistant({
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 24, overflow: "hidden",
         display: "flex", flexDirection: "column",
-        maxHeight: "85vh",
+        maxHeight: "93vh",
       }}>
 
         {/* Header */}
@@ -636,67 +650,66 @@ export default function VoiceAssistant({
 
         {/* Zone basse */}
         <div style={{
-          padding: "14px 20px",
+          padding: "8px 16px",
           borderTop: "1px solid rgba(255,255,255,0.07)",
-          display: "flex", flexDirection: "column", gap: 10,
+          display: "flex", flexDirection: "column", gap: 6,
         }}>
-          {/* Bouton micro */}
-          <div style={{ display: "flex", justifyContent: "center" }}>
+          {/* Micro + statut centrés */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
             <button
               onClick={isRecording ? stopRecording : startRecording}
               disabled={isProcessing}
               style={{
-                width: 60, height: 60, borderRadius: "50%", border: "none",
+                width: 42, height: 42, borderRadius: "50%", border: "none",
                 background: isRecording
                   ? "linear-gradient(135deg,#ef4444,#dc2626)"
                   : isSpeaking
                   ? "linear-gradient(135deg,#f59e0b,#d97706)"
                   : "linear-gradient(135deg,#6366f1,#a855f7)",
                 cursor: isProcessing ? "not-allowed" : "pointer",
-                fontSize: 24,
+                fontSize: 18,
                 boxShadow: isRecording
-                  ? "0 0 0 8px rgba(239,68,68,0.2), 0 4px 20px rgba(239,68,68,0.4)"
+                  ? "0 0 0 6px rgba(239,68,68,0.2), 0 4px 16px rgba(239,68,68,0.4)"
                   : isSpeaking
-                  ? "0 0 0 8px rgba(245,158,11,0.2), 0 4px 20px rgba(245,158,11,0.4)"
-                  : "0 4px 20px rgba(99,102,241,0.4)",
+                  ? "0 0 0 6px rgba(245,158,11,0.2), 0 4px 16px rgba(245,158,11,0.4)"
+                  : "0 4px 16px rgba(99,102,241,0.4)",
                 transition: "all 0.2s",
                 opacity: isProcessing ? 0.5 : 1,
                 animation: isSpeaking ? "pulse 1.5s infinite" : "none",
               }}>
               {isProcessing ? "⏳" : isRecording ? "⏹" : isSpeaking ? "🔊" : "🎤"}
             </button>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0, textAlign: "center" }}>
+              {isRecording   ? "🔴 Parlez maintenant... cliquez pour arrêter"
+              : isProcessing ? "⏳ Traitement en cours..."
+              : isSpeaking   ? "🔊 Cliquez sur le micro pour répondre"
+              : pendingIncomplete ? "🎤 Parlez ou tapez votre réponse"
+              : "Cliquez sur le micro et parlez"}
+            </p>
           </div>
-
-          <p style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.3)", margin: 0 }}>
-            {isRecording   ? "🔴 Parlez maintenant... cliquez pour arrêter"
-            : isProcessing ? "⏳ Traitement en cours..."
-            : isSpeaking   ? "🔊 Cliquez sur le micro pour répondre"
-            : pendingIncomplete ? "🎤 Parlez ou tapez votre réponse"
-            : "Cliquez sur le micro et parlez"}
-          </p>
 
           {/* Suggestions (masquées pendant un dialogue en cours) */}
           {!pendingIncomplete && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "center" }}>
               {suggestions.map((q, i) => (
                 <button key={i} onClick={() => {
                   addMessage("user", q);
                   setS("processing");
                   sendToChat(q);
                 }} style={{
-                  padding: "4px 10px",
+                  padding: "3px 8px",
                   border: "1px solid rgba(99,102,241,0.3)",
                   borderRadius: 20,
                   background: "rgba(99,102,241,0.08)",
                   color: "#a5b4fc", cursor: "pointer",
-                  fontFamily: "Sora, sans-serif", fontSize: 11,
+                  fontFamily: "Sora, sans-serif", fontSize: 10,
                 }}>{q}</button>
               ))}
             </div>
           )}
 
           {/* Champ texte */}
-          <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
+          <form onSubmit={handleSubmit} style={{ display: "flex", gap: 6 }}>
             <input
               value={inputText}
               onChange={e => setInputText(e.target.value)}
@@ -707,17 +720,17 @@ export default function VoiceAssistant({
               }
               disabled={isRecording || isProcessing}
               style={{
-                flex: 1, padding: "10px 14px",
+                flex: 1, padding: "8px 12px",
                 background: "rgba(255,255,255,0.05)",
                 border: `1px solid ${pendingIncomplete ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.1)"}`,
-                borderRadius: 10, color: "#fff", fontSize: 13,
+                borderRadius: 10, color: "#fff", fontSize: 12,
                 fontFamily: "Sora, sans-serif", outline: "none",
               }}
             />
             <button type="submit"
               disabled={!inputText.trim() || isProcessing}
               style={{
-                padding: "10px 16px", border: "none", borderRadius: 10,
+                padding: "8px 14px", border: "none", borderRadius: 10,
                 background: "#6366f1", color: "#fff", cursor: "pointer",
                 fontFamily: "Sora, sans-serif", fontSize: 14, fontWeight: 600,
                 opacity: !inputText.trim() || isProcessing ? 0.4 : 1,
