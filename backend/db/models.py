@@ -240,3 +240,20 @@ class Alert(Base):
     created_at  = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     student = relationship("Student", back_populates="alerts")
+
+
+# ─── MESSAGERIE INTERNE ───────────────────────────────────────────────────────
+
+class Message(Base):
+    """Messages privés entre utilisateurs (prof ↔ étudiant, admin ↔ tous)."""
+    __tablename__ = "messages"
+
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sender_id   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    receiver_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    content     = Column(Text, nullable=False)
+    is_read     = Column(Boolean, default=False)
+    created_at  = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    sender   = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])

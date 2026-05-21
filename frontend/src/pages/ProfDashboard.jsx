@@ -44,7 +44,7 @@ function EmptyState({ message }) {
   );
 }
 
-export default function ProfDashboard({ user, onLogout }) {
+export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
   const bp = useBreakpoint();
   const [overview,   setOverview]  = useState(null);
   const [today,      setToday]     = useState([]);
@@ -53,6 +53,7 @@ export default function ProfDashboard({ user, onLogout }) {
   const [activeTab,  setActiveTab] = useState("overview");
   const [loading,    setLoading]   = useState(true);
   const [showVoice,  setShowVoice] = useState(false);
+  const [unreadMsg,  setUnreadMsg] = useState(0);
 
   const [pwForm,    setPwForm]    = useState({ current_password: "", new_password: "", confirm: "" });
   const [pwMsg,     setPwMsg]     = useState("");
@@ -67,7 +68,11 @@ export default function ProfDashboard({ user, onLogout }) {
     "Bilan de mes cours",
   ];
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+    loadAll();
+    axios.get(`${API_URL}/api/messaging/unread-count`, authHeaders())
+      .then(r => setUnreadMsg(r.data.count)).catch(() => {});
+  }, []);
 
   const loadAll = async () => {
     setLoading(true);
@@ -169,6 +174,23 @@ export default function ProfDashboard({ user, onLogout }) {
             padding: bp.isMobile ? "6px 10px" : "6px 14px",
             fontFamily: "Sora, sans-serif", fontSize: 12, fontWeight: 600,
           }}>{bp.isMobile ? "🎤" : "🎤 Assistant IA"}</button>
+          <button onClick={onOpenMessages} className="sc-btn" style={{
+            position: "relative",
+            background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)",
+            borderRadius: 8, color: "#a5b4fc", cursor: "pointer",
+            padding: bp.isMobile ? "6px 10px" : "6px 14px",
+            fontFamily: "Sora, sans-serif", fontSize: 12, fontWeight: 600,
+          }}>
+            {bp.isMobile ? "💬" : "💬 Messages"}
+            {unreadMsg > 0 && (
+              <span style={{
+                position: "absolute", top: -6, right: -6,
+                background: "#ef4444", color: "#fff", fontSize: 10, fontWeight: 700,
+                minWidth: 18, height: 18, borderRadius: 9,
+                display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px",
+              }}>{unreadMsg}</span>
+            )}
+          </button>
           <button onClick={onLogout} className="sc-btn" style={{
             background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8, color: "rgba(255,255,255,0.6)", cursor: "pointer",

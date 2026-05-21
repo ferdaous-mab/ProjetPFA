@@ -6,6 +6,7 @@ import AdminDashboard   from "./pages/AdminDashboard";
 import ProfDashboard    from "./pages/ProfDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import MessagingPage    from "./pages/MessagingPage";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -91,15 +92,19 @@ export default function App() {
     );
   }
 
+  if (page === "messaging" && user !== null) {
+    return <MessagingPage user={user} onBack={() => setPage("dashboard")} />;
+  }
+
   if (page === "dashboard" && user !== null) {
     if (user.role === "admin") {
-      return <AdminDashboard user={user} onLogout={handleLogout} />;
+      return <AdminDashboard user={user} onLogout={handleLogout} onOpenMessages={() => setPage("messaging")} />;
     }
     if (user.role === "professeur") {
-      return <ProfDashboard user={user} onLogout={handleLogout} />;
+      return <ProfDashboard user={user} onLogout={handleLogout} onOpenMessages={() => setPage("messaging")} />;
     }
     if (user.role === "etudiant") {
-      return <StudentDashboard user={user} onLogout={handleLogout} />;
+      return <StudentDashboard user={user} onLogout={handleLogout} onOpenMessages={() => setPage("messaging")} />;
     }
   }
 

@@ -11,6 +11,7 @@ from routes.prof        import router as prof_router
 from routes.student     import router as student_router
 from routes.gestion     import router as gestion_router
 from routes.voice       import router as voice_router
+from routes.messaging   import router as messaging_router
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ app.include_router(prof_router,        prefix="/api")
 app.include_router(student_router,     prefix="/api")
 app.include_router(gestion_router,     prefix="/api")
 app.include_router(voice_router,       prefix="/api")
+app.include_router(messaging_router,   prefix="/api")
 
 
 def _preload_ai_models():

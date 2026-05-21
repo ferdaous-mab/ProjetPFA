@@ -62,7 +62,7 @@ async def get_overview(
         "total_sessions":       sess_q.count(),
         "total_matieres":       mat_q.count(),
         "total_profs":          db.query(User).filter(User.role == "professeur", User.is_active == True).count(),
-        "alertes_non_lues":     db.query(Alert).filter(Alert.is_read == False, Alert.target_role == "admin").count(),
+        "alertes_non_lues":     db.query(Alert).filter(Alert.is_read == False).count(),
         "taux_presence_global": taux_global,
     }
 
@@ -421,6 +421,9 @@ async def prediction_risque(
         })
 
     results.sort(key=lambda x: x["score_risque"], reverse=True)
+
+    # Libérer la connexion DB avant l'appel Claude (qui peut prendre plusieurs secondes)
+    db.close()
 
     # Analyse Claude pour les étudiants à risque modéré ou plus
     at_risk = [r for r in results if r["score_risque"] >= 20][:6]

@@ -117,7 +117,7 @@ function Btn({ onClick, children, color = "#6366f1", style = {} }) {
   );
 }
 
-export default function AdminDashboard({ user, onLogout }) {
+export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   const bp = useBreakpoint();
   const [overview,    setOverview]    = useState(null);
   const [presClasse,  setPresClasse]  = useState([]);
@@ -146,6 +146,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [formMat,   setFormMat]   = useState({ nom:"", code:"", coefficient:"1", annee_scolaire:"1ère année", professeur_id:"" });
   const [formEmploi,setFormEmploi]= useState({ matiere_id:"", annee_scolaire:"1ère année", classe:"A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
   const [msg,       setMsg]       = useState("");
+  const [unreadMsg, setUnreadMsg] = useState(0);
 
   // Modal étudiant
   const [selectedEtudiant, setSelectedEtudiant] = useState(null);
@@ -190,10 +191,11 @@ export default function AdminDashboard({ user, onLogout }) {
   const [alertPredFeedback, setAlertPredFeedback] = useState("");
 
   useEffect(() => {
-    // Charge les options de filtres une seule fois au démarrage
     axios.get(`${API_URL}/api/bi/filtres`, authHeaders())
       .then(r => setFilterOptions(r.data))
       .catch(() => {});
+    axios.get(`${API_URL}/api/messaging/unread-count`, authHeaders())
+      .then(r => setUnreadMsg(r.data.count)).catch(() => {});
   }, []);
   useEffect(() => { loadBI(); }, [gf]);
   useEffect(() => { if (activeTab === "gestion") loadGestion(); }, [activeTab]);
@@ -869,6 +871,23 @@ export default function AdminDashboard({ user, onLogout }) {
             padding: bp.isMobile ? "6px 10px" : "6px 14px",
             fontFamily: "Sora, sans-serif", fontSize: 12, fontWeight: 600,
           }}>{bp.isMobile ? "🎤" : "🎤 Assistant IA"}</button>
+          <button onClick={onOpenMessages} className="sc-btn" style={{
+            position: "relative",
+            background: "rgba(14,165,233,0.12)", border: "1px solid rgba(14,165,233,0.3)",
+            borderRadius: 8, color: "#7dd3fc", cursor: "pointer",
+            padding: bp.isMobile ? "6px 10px" : "6px 14px",
+            fontFamily: "Sora, sans-serif", fontSize: 12, fontWeight: 600,
+          }}>
+            {bp.isMobile ? "💬" : "💬 Messages"}
+            {unreadMsg > 0 && (
+              <span style={{
+                position: "absolute", top: -6, right: -6,
+                background: "#ef4444", color: "#fff", fontSize: 10, fontWeight: 700,
+                minWidth: 18, height: 18, borderRadius: 9,
+                display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px",
+              }}>{unreadMsg}</span>
+            )}
+          </button>
           <span className="header-username" style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
             {user?.prenom} {user?.nom}
           </span>
