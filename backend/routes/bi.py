@@ -9,6 +9,9 @@ from db.models import (
 )
 from db.crud import get_absence_count, get_average_by_student
 from datetime import datetime, timezone, timedelta
+import anthropic
+import os
+import json as json_lib
 
 router = APIRouter()
 
@@ -346,3 +349,127 @@ async def alertes_recentes(
         "created_at": str(a.created_at),
         "student_id": str(a.student_id),
     } for a in alerts]
+
+
+@router.get("/bi/prediction-risque")
+async def prediction_risque(
+    classe:         Optional[str] = None,
+    annee_scolaire: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    students = _students(db, classe, annee_scolaire)
+    today   = datetime.now(timezone.utc).date()
+    cutoff  = today - timedelta(days=14)
+
+    results = []
+    for s in students:
+        total_att   = db.query(Attendance).filter(Attendance.student_id == s.id).count()
+        nb_absences = db.query(Attendance).filter(
+            Attendance.student_id == s.id, Attendance.status == "absent"
+        ).count()
+        taux_absence = round(nb_absences / total_att * 100, 1) if total_att > 0 else 0
+
+        # Tendance sur les 14 derniers jours
+        recent_sess_ids = [
+            sess.id for sess in db.query(SessionModel).filter(
+                SessionModel.classe == s.classe, SessionModel.date >= cutoff
+            ).all()
+        ]
+        if recent_sess_ids:
+            r_total = db.query(Attendance).filter(
+                Attendance.student_id == s.id,
+                Attendance.session_id.in_(recent_sess_ids)
+            ).count()
+            r_abs = db.query(Attendance).filter(
+                Attendance.student_id == s.id,
+                Attendance.session_id.in_(recent_sess_ids),
+                Attendance.status == "absent"
+            ).count()
+            r_taux = round(r_abs / r_total * 100, 1) if r_total > 0 else taux_absence
+            if r_taux > taux_absence * 1.25:
+                tendance = "en hausse"
+            elif r_taux < taux_absence * 0.75:
+                tendance = "en amélioration"
+            else:
+                tendance = "stable"
+        else:
+            tendance = "stable"
+
+        moyenne    = get_average_by_student(db, s.id)
+        has_grades = db.query(Grade).filter(Grade.student_id == s.id).count() > 0
+
+        # Score de risque (0-100)
+        absence_score = (0.6 * min(nb_absences / 8.0, 1.0) + 0.4 * taux_absence / 100.0) * 100
+        grade_score   = max(0, (10 - moyenne) / 10.0 * 100) if has_grades and moyenne > 0 else 0
+        trend_score   = {"en hausse": 80, "stable": 30, "en amélioration": 0}.get(tendance, 30)
+        score         = round(min(100, max(0, 0.45 * absence_score + 0.40 * grade_score + 0.15 * trend_score)), 1)
+
+        if score >= 70:   niveau = "critique"
+        elif score >= 45: niveau = "élevé"
+        elif score >= 20: niveau = "modéré"
+        else:             niveau = "faible"
+
+        results.append({
+            "student_id": str(s.id),
+            "nom": s.nom, "prenom": s.prenom,
+            "classe": s.classe, "annee_scolaire": s.annee_scolaire,
+            "score_risque": score, "niveau_risque": niveau,
+            "nb_absences": nb_absences, "taux_absence": taux_absence,
+            "moyenne": moyenne, "tendance": tendance,
+            "analyse_ia": None, "recommandations_ia": [],
+        })
+
+    results.sort(key=lambda x: x["score_risque"], reverse=True)
+
+    # Analyse Claude pour les étudiants à risque modéré ou plus
+    at_risk = [r for r in results if r["score_risque"] >= 20][:6]
+    if at_risk:
+        try:
+            api_key = os.getenv("ANTHROPIC_API_KEY", "")
+            if api_key:
+                client = anthropic.Anthropic(api_key=api_key)
+                students_list = "\n".join([
+                    f"- {r['prenom']} {r['nom']} | Classe {r['classe']} {r['annee_scolaire']} | "
+                    f"Score={r['score_risque']}/100 ({r['niveau_risque']}) | "
+                    f"Absences={r['nb_absences']} ({r['taux_absence']}%) | "
+                    f"Moyenne={r['moyenne']}/20 | Tendance={r['tendance']}"
+                    for r in at_risk
+                ])
+                prompt = (
+                    "Tu es un conseiller pédagogique dans un établissement supérieur marocain.\n"
+                    "Analyse ces profils étudiants à risque et génère des recommandations personnalisées en français.\n\n"
+                    f"{students_list}\n\n"
+                    "Réponds UNIQUEMENT avec ce JSON (pas de texte avant/après) :\n"
+                    '{\n  "etudiants": [\n    {\n'
+                    '      "nom_complet": "Prénom Nom",\n'
+                    '      "analyse": "Analyse concise du profil en 1-2 phrases.",\n'
+                    '      "recommandations": ["Action concrète 1", "Action concrète 2"]\n'
+                    "    }\n  ]\n}"
+                )
+                response = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=1400,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                raw   = response.content[0].text
+                start = raw.find("{"); end = raw.rfind("}") + 1
+                if start != -1 and end > start:
+                    ia_data  = json_lib.loads(raw[start:end])
+                    name_map = {f"{r['prenom']} {r['nom']}".lower(): r for r in results}
+                    for entry in ia_data.get("etudiants", []):
+                        key = entry.get("nom_complet", "").lower()
+                        if key in name_map:
+                            name_map[key]["analyse_ia"]         = entry.get("analyse", "")
+                            name_map[key]["recommandations_ia"] = entry.get("recommandations", [])
+        except Exception:
+            pass
+
+    stats = {
+        "critique": sum(1 for r in results if r["niveau_risque"] == "critique"),
+        "eleve":    sum(1 for r in results if r["niveau_risque"] == "élevé"),
+        "modere":   sum(1 for r in results if r["niveau_risque"] == "modéré"),
+        "faible":   sum(1 for r in results if r["niveau_risque"] == "faible"),
+        "total":    len(results),
+    }
+    return {"etudiants": results, "stats": stats}

@@ -128,6 +128,8 @@ export default function AdminDashboard({ user, onLogout }) {
   const [topAbsences, setTopAbsences] = useState([]);
   const [notesMat,    setNotesMat]    = useState([]);
   const [alertes,     setAlertes]     = useState([]);
+  const [prediction,  setPrediction]  = useState(null);
+  const [predLoading, setPredLoading] = useState(false);
   const [activeTab,   setActiveTab]   = useState("overview");
   const [loading,     setLoading]     = useState(true);
   const [showVoice,   setShowVoice]   = useState(false);
@@ -189,6 +191,7 @@ export default function AdminDashboard({ user, onLogout }) {
   }, []);
   useEffect(() => { loadBI(); }, [gf]);
   useEffect(() => { if (activeTab === "gestion") loadGestion(); }, [activeTab]);
+  useEffect(() => { if (activeTab === "prediction") loadPrediction(); }, [activeTab, gf]);
   useEffect(() => { if (activeTab === "gestion" && gTab === "notes")    loadNotes();    }, [gTab]);
   useEffect(() => { if (activeTab === "gestion" && gTab === "sessions") loadSessions(); }, [gTab]);
 
@@ -221,6 +224,19 @@ export default function AdminDashboard({ user, onLogout }) {
       setAlertes(al.data);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
+  };
+
+  const loadPrediction = async () => {
+    setPredLoading(true);
+    const p = [];
+    if (gf.classe) p.push(`classe=${encodeURIComponent(gf.classe)}`);
+    if (gf.niveau) p.push(`annee_scolaire=${encodeURIComponent(gf.niveau)}`);
+    const qs = p.length ? `?${p.join("&")}` : "";
+    try {
+      const res = await axios.get(`${API_URL}/api/bi/prediction-risque${qs}`, authHeaders());
+      setPrediction(res.data);
+    } catch (err) { console.error(err); }
+    finally { setPredLoading(false); }
   };
 
   const loadGestion = async () => {
@@ -521,12 +537,13 @@ export default function AdminDashboard({ user, onLogout }) {
   ], "notes.csv");
 
   const tabs = [
-    { id: "overview",  label: "Vue d'ensemble", icon: "📊" },
-    { id: "presences", label: "Présences",       icon: "✅" },
-    { id: "risques",   label: "Risques",         icon: "⚠️" },
-    { id: "notes",     label: "Notes",           icon: "📝" },
-    { id: "alertes",   label: "Alertes",         icon: "🔔" },
-    { id: "gestion",   label: "Gestion",         icon: "⚙️" },
+    { id: "overview",    label: "Vue d'ensemble", icon: "📊" },
+    { id: "presences",   label: "Présences",       icon: "✅" },
+    { id: "risques",     label: "Risques",         icon: "⚠️" },
+    { id: "notes",       label: "Notes",           icon: "📝" },
+    { id: "alertes",     label: "Alertes",         icon: "🔔" },
+    { id: "prediction",  label: "Prédiction IA",   icon: "🤖" },
+    { id: "gestion",     label: "Gestion",         icon: "⚙️" },
   ];
 
   const gTabs = [
@@ -1161,6 +1178,205 @@ export default function AdminDashboard({ user, onLogout }) {
               ))
             }
           </Card>
+        )}
+
+        {/* Prédiction IA */}
+        {activeTab === "prediction" && (
+          <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {predLoading ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                justifyContent: "center", gap: 16, padding: "80px 20px" }}>
+                <div className="sc-spinner" />
+                <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: 500 }}>
+                  Analyse en cours avec Claude AI...
+                </span>
+              </div>
+            ) : !prediction ? (
+              <EmptyState message="Aucune donnée disponible" />
+            ) : (
+              <>
+                {/* Stat cards */}
+                <div style={{ display: "grid", gridTemplateColumns: bp.colsAuto, gap: bp.gap2 }}>
+                  {[
+                    { label: "Critique",  key: "critique", color: "#ef4444", sub: "score ≥ 70", icon: "🔴" },
+                    { label: "Élevé",     key: "eleve",    color: "#f97316", sub: "score ≥ 45", icon: "🟠" },
+                    { label: "Modéré",    key: "modere",   color: "#f59e0b", sub: "score ≥ 20", icon: "🟡" },
+                    { label: "Faible",    key: "faible",   color: "#22c55e", sub: "score < 20", icon: "🟢" },
+                  ].map(({ label, key, color, sub, icon }) => (
+                    <StatCard key={key} icon={icon} label={label} color={color}
+                      value={prediction.stats[key]} sub={sub} />
+                  ))}
+                </div>
+
+                {/* Barre de distribution */}
+                {prediction.stats.total > 0 && (
+                  <Card>
+                    <SectionTitle title="Distribution des risques" icon="📊" />
+                    <div style={{ display: "flex", height: 10, borderRadius: 6, overflow: "hidden", gap: 2 }}>
+                      {[
+                        { key: "critique", color: "#ef4444" },
+                        { key: "eleve",    color: "#f97316" },
+                        { key: "modere",   color: "#f59e0b" },
+                        { key: "faible",   color: "#22c55e" },
+                      ].map(({ key, color }) =>
+                        prediction.stats[key] > 0 ? (
+                          <div key={key} style={{ flex: prediction.stats[key], background: color, borderRadius: 4 }} />
+                        ) : null
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 20, marginTop: 12, flexWrap: "wrap" }}>
+                      {[
+                        { label: "Critique", key: "critique", color: "#ef4444" },
+                        { label: "Élevé",    key: "eleve",    color: "#f97316" },
+                        { label: "Modéré",   key: "modere",   color: "#f59e0b" },
+                        { label: "Faible",   key: "faible",   color: "#22c55e" },
+                      ].map(({ label, key, color }) => (
+                        <div key={key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 2, background: color }} />
+                          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+                            {label}:{" "}
+                            <span style={{ color, fontWeight: 700 }}>{prediction.stats[key]}</span>
+                            <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>
+                              {" "}({Math.round(prediction.stats[key] / prediction.stats.total * 100)}%)
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Cartes étudiants */}
+                <Card>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+                    <SectionTitle title="Analyse individuelle par IA" icon="🤖" />
+                    <Btn onClick={loadPrediction} color="#6366f1" style={{ fontSize: 11, padding: "6px 14px" }}>
+                      🔄 Rafraîchir
+                    </Btn>
+                  </div>
+                  {prediction.etudiants.length === 0 ? (
+                    <EmptyState message="Aucun étudiant à analyser" />
+                  ) : (
+                    prediction.etudiants.map((s, i) => {
+                      const riskColor =
+                        s.niveau_risque === "critique" ? "#ef4444"
+                        : s.niveau_risque === "élevé"   ? "#f97316"
+                        : s.niveau_risque === "modéré"  ? "#f59e0b"
+                        : "#22c55e";
+                      return (
+                        <div key={i} style={{
+                          background: `${riskColor}08`,
+                          border: `1px solid ${riskColor}22`,
+                          borderLeft: `3px solid ${riskColor}`,
+                          borderRadius: 12, padding: "16px 18px", marginBottom: 10,
+                        }}>
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+                            {/* Score circulaire */}
+                            <div style={{
+                              width: 56, height: 56, borderRadius: "50%",
+                              background: `${riskColor}18`,
+                              border: `2px solid ${riskColor}40`,
+                              display: "flex", flexDirection: "column",
+                              alignItems: "center", justifyContent: "center", flexShrink: 0,
+                            }}>
+                              <span style={{ fontSize: 15, fontWeight: 700, color: riskColor, lineHeight: 1 }}>
+                                {s.score_risque}
+                              </span>
+                              <span style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>/100</span>
+                            </div>
+
+                            <div style={{ flex: 1 }}>
+                              {/* En-tête */}
+                              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                                <span style={{ fontWeight: 700, fontSize: 14 }}>{s.prenom} {s.nom}</span>
+                                <span style={{ background: "rgba(99,102,241,0.15)", color: "#a5b4fc",
+                                  fontSize: 11, padding: "2px 8px", borderRadius: 6 }}>
+                                  Classe {s.classe}
+                                </span>
+                                {s.annee_scolaire && (
+                                  <span style={{ background: "rgba(14,165,233,0.12)", color: "#38bdf8",
+                                    fontSize: 11, padding: "2px 8px", borderRadius: 6 }}>
+                                    {s.annee_scolaire}
+                                  </span>
+                                )}
+                                <span style={{ background: `${riskColor}20`, color: riskColor,
+                                  fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 600,
+                                  textTransform: "capitalize" }}>
+                                  {s.niveau_risque}
+                                </span>
+                              </div>
+
+                              {/* Métriques */}
+                              <div style={{ display: "flex", gap: 16, flexWrap: "wrap",
+                                marginBottom: s.analyse_ia ? 12 : 0 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>Absences :</span>
+                                  <span style={{ fontSize: 13, fontWeight: 600,
+                                    color: s.nb_absences > 5 ? "#ef4444" : s.nb_absences > 2 ? "#f59e0b" : "#22c55e" }}>
+                                    {s.nb_absences} ({s.taux_absence}%)
+                                  </span>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>Moyenne :</span>
+                                  <span style={{ fontSize: 13, fontWeight: 600,
+                                    color: s.moyenne === 0 ? "rgba(255,255,255,0.3)" : s.moyenne < 10 ? "#ef4444" : "#22c55e" }}>
+                                    {s.moyenne === 0 ? "—" : `${s.moyenne}/20`}
+                                  </span>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>Tendance :</span>
+                                  <span style={{ fontSize: 13, fontWeight: 600,
+                                    color: s.tendance === "en hausse" ? "#ef4444"
+                                      : s.tendance === "en amélioration" ? "#22c55e" : "#f59e0b" }}>
+                                    {s.tendance === "en hausse" ? "↑ En hausse"
+                                      : s.tendance === "en amélioration" ? "↓ En baisse" : "→ Stable"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Analyse IA */}
+                              {s.analyse_ia && (
+                                <div>
+                                  <div style={{
+                                    fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.6,
+                                    background: "rgba(99,102,241,0.08)", borderRadius: 8,
+                                    padding: "10px 12px", marginBottom: 10,
+                                    borderLeft: "2px solid rgba(99,102,241,0.4)",
+                                  }}>
+                                    <span style={{ fontSize: 10, color: "#a5b4fc", fontWeight: 700,
+                                      display: "block", marginBottom: 4, letterSpacing: "0.06em" }}>
+                                      ANALYSE IA
+                                    </span>
+                                    {s.analyse_ia}
+                                  </div>
+                                  {s.recommandations_ia.length > 0 && (
+                                    <div>
+                                      <div style={{ fontSize: 10, color: "#a5b4fc", fontWeight: 700,
+                                        marginBottom: 6, letterSpacing: "0.06em" }}>
+                                        RECOMMANDATIONS
+                                      </div>
+                                      {s.recommandations_ia.map((rec, j) => (
+                                        <div key={j} style={{ display: "flex", alignItems: "flex-start",
+                                          gap: 8, fontSize: 12, color: "rgba(255,255,255,0.6)",
+                                          marginBottom: 5, lineHeight: 1.5 }}>
+                                          <span style={{ color: "#6366f1", fontWeight: 700, flexShrink: 0 }}>→</span>
+                                          {rec}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </Card>
+              </>
+            )}
+          </div>
         )}
 
         {/* Gestion */}
