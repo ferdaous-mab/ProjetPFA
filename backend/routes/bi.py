@@ -62,7 +62,7 @@ async def get_overview(
         "total_sessions":       sess_q.count(),
         "total_matieres":       mat_q.count(),
         "total_profs":          db.query(User).filter(User.role == "professeur", User.is_active == True).count(),
-        "alertes_non_lues":     db.query(Alert).filter(Alert.is_read == False).count(),
+        "alertes_non_lues":     db.query(Alert).filter(Alert.is_read == False, Alert.target_role == "admin").count(),
         "taux_presence_global": taux_global,
     }
 

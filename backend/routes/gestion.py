@@ -13,7 +13,7 @@ from db.crud import (
     create_emploi_temps,
     get_all_students, delete_student,
 )
-from db.models import User, Matiere, EmploiTemps, StudentImage, Attendance, Grade, Student
+from db.models import User, Matiere, EmploiTemps, StudentImage, Attendance, Grade, Student, Alert
 from datetime import time
 
 router = APIRouter()

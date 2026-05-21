@@ -183,6 +183,12 @@ export default function AdminDashboard({ user, onLogout }) {
   const [formAlerte, setFormAlerte] = useState({ message:"", type:"information", severity:"medium", cible:"etudiant", student_id:"", classe:"" });
   const [alerteMsg,  setAlerteMsg]  = useState("");
 
+  // Modale alerte depuis Prédiction IA
+  const [alertPredModal,    setAlertPredModal]    = useState(null);
+  const [alertPredForm,     setAlertPredForm]     = useState({ message: "", severity: "medium", type: "avertissement", target_role: "etudiant" });
+  const [alertPredSending,  setAlertPredSending]  = useState(false);
+  const [alertPredFeedback, setAlertPredFeedback] = useState("");
+
   useEffect(() => {
     // Charge les options de filtres une seule fois au démarrage
     axios.get(`${API_URL}/api/bi/filtres`, authHeaders())
@@ -237,6 +243,42 @@ export default function AdminDashboard({ user, onLogout }) {
       setPrediction(res.data);
     } catch (err) { console.error(err); }
     finally { setPredLoading(false); }
+  };
+
+  const openAlertPred = (s) => {
+    const sevMap  = { critique: "high", "élevé": "medium", "modéré": "low", faible: "low" };
+    const typeMap = { critique: "convocation", "élevé": "avertissement", "modéré": "information", faible: "information" };
+    const defaultMsg = s.analyse_ia
+      ? s.analyse_ia
+      : `L'étudiant(e) ${s.prenom} ${s.nom} présente un risque ${s.niveau_risque} (score ${s.score_risque}/100) : ${s.nb_absences} absence(s)${s.moyenne > 0 ? `, moyenne ${s.moyenne}/20` : ""}.`;
+    setAlertPredModal(s);
+    setAlertPredForm({
+      message:     defaultMsg,
+      severity:    sevMap[s.niveau_risque]  || "medium",
+      type:        typeMap[s.niveau_risque] || "avertissement",
+      target_role: "etudiant",
+    });
+    setAlertPredFeedback("");
+  };
+
+  const sendAlertPred = async () => {
+    if (!alertPredModal || !alertPredForm.message.trim()) return;
+    setAlertPredSending(true);
+    try {
+      await axios.post(`${API_URL}/api/gestion/alertes`, {
+        student_id:  alertPredModal.student_id,
+        message:     alertPredForm.message,
+        severity:    alertPredForm.severity,
+        type:        alertPredForm.type,
+        target_role: alertPredForm.target_role,
+      }, authHeaders());
+      setAlertPredFeedback("ok");
+      setTimeout(() => setAlertPredModal(null), 1500);
+    } catch {
+      setAlertPredFeedback("err");
+    } finally {
+      setAlertPredSending(false);
+    }
   };
 
   const loadGestion = async () => {
@@ -1367,6 +1409,19 @@ export default function AdminDashboard({ user, onLogout }) {
                                   )}
                                 </div>
                               )}
+
+                              {/* Bouton alerte */}
+                              <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                                <button onClick={() => openAlertPred(s)} style={{
+                                  padding: "7px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+                                  background: `${riskColor}22`, color: riskColor,
+                                  fontSize: 12, fontWeight: 600, fontFamily: "Sora, sans-serif",
+                                  display: "flex", alignItems: "center", gap: 6,
+                                  transition: "background 0.15s",
+                                }}>
+                                  🔔 Envoyer une alerte
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1376,6 +1431,118 @@ export default function AdminDashboard({ user, onLogout }) {
                 </Card>
               </>
             )}
+          </div>
+        )}
+
+        {/* Modale — Envoyer alerte depuis Prédiction IA */}
+        {alertPredModal && (
+          <div onClick={() => setAlertPredModal(null)} style={{
+            position: "fixed", inset: 0, zIndex: 300,
+            background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: "#0b0b18", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 20, width: "100%", maxWidth: 500,
+              boxShadow: "0 32px 100px rgba(0,0,0,0.7)", padding: "28px 28px 24px",
+            }}>
+              {/* En-tête */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>🔔 Envoyer une alerte</div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>
+                    {alertPredModal.prenom} {alertPredModal.nom} · Classe {alertPredModal.classe}
+                  </div>
+                </div>
+                <button onClick={() => setAlertPredModal(null)} style={{
+                  background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 8,
+                  color: "rgba(255,255,255,0.5)", cursor: "pointer", width: 30, height: 30,
+                  fontSize: 14, fontFamily: "Sora, sans-serif",
+                }}>✕</button>
+              </div>
+
+              {/* Message */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600,
+                  letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>MESSAGE</label>
+                <textarea
+                  value={alertPredForm.message}
+                  onChange={e => setAlertPredForm(f => ({ ...f, message: e.target.value }))}
+                  rows={4}
+                  style={{
+                    width: "100%", padding: "10px 14px", boxSizing: "border-box",
+                    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 10, color: "#fff", fontSize: 12, fontFamily: "Sora, sans-serif",
+                    resize: "vertical", outline: "none", lineHeight: 1.6,
+                  }}
+                />
+              </div>
+
+              {/* Ligne options */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+                {/* Type */}
+                <div>
+                  <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600,
+                    letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>TYPE</label>
+                  <select value={alertPredForm.type}
+                    onChange={e => setAlertPredForm(f => ({ ...f, type: e.target.value }))}
+                    style={{ width: "100%", padding: "8px 10px", background: "#0d0d1a",
+                      border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                      color: "#fff", fontSize: 12, fontFamily: "Sora, sans-serif", outline: "none" }}>
+                    <option value="information">Information</option>
+                    <option value="avertissement">Avertissement</option>
+                    <option value="convocation">Convocation</option>
+                  </select>
+                </div>
+                {/* Sévérité */}
+                <div>
+                  <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600,
+                    letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>SÉVÉRITÉ</label>
+                  <select value={alertPredForm.severity}
+                    onChange={e => setAlertPredForm(f => ({ ...f, severity: e.target.value }))}
+                    style={{ width: "100%", padding: "8px 10px", background: "#0d0d1a",
+                      border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                      color: "#fff", fontSize: 12, fontFamily: "Sora, sans-serif", outline: "none" }}>
+                    <option value="low">Faible</option>
+                    <option value="medium">Moyen</option>
+                    <option value="high">Élevé</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Feedback */}
+              {alertPredFeedback === "ok" && (
+                <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)",
+                  borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#22c55e",
+                  marginBottom: 14, fontWeight: 500 }}>
+                  ✅ Alerte envoyée avec succès !
+                </div>
+              )}
+              {alertPredFeedback === "err" && (
+                <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+                  borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#ef4444",
+                  marginBottom: 14, fontWeight: 500 }}>
+                  ❌ Erreur lors de l'envoi. Réessayez.
+                </div>
+              )}
+
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button onClick={() => setAlertPredModal(null)} style={{
+                  padding: "9px 18px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.1)",
+                  background: "transparent", color: "rgba(255,255,255,0.5)",
+                  cursor: "pointer", fontFamily: "Sora, sans-serif", fontSize: 13,
+                }}>Annuler</button>
+                <button onClick={sendAlertPred} disabled={alertPredSending} style={{
+                  padding: "9px 22px", borderRadius: 9, border: "none",
+                  background: alertPredSending ? "rgba(99,102,241,0.4)" : "#6366f1",
+                  color: "#fff", cursor: alertPredSending ? "not-allowed" : "pointer",
+                  fontFamily: "Sora, sans-serif", fontSize: 13, fontWeight: 600,
+                }}>
+                  {alertPredSending ? "Envoi..." : "🔔 Envoyer"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
