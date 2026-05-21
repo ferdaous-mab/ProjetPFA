@@ -10,7 +10,7 @@ import string
 from db.crud import (
     create_user, get_user_by_email, get_users_by_role,
     create_matiere, get_all_matieres, get_matiere_by_id,
-    create_emploi_temps, get_emplois_by_classe,
+    create_emploi_temps,
     get_all_students, delete_student,
 )
 from db.models import User, Matiere, EmploiTemps, StudentImage, Attendance, Grade, Student
@@ -32,8 +32,8 @@ class MatiereCreate(BaseModel):
     nom:           str
     code:          Optional[str] = None
     coefficient:   float = 1.0
-    classe:        str
-    annee_scolaire: str = "2025-2026"
+    classe:        Optional[str] = None
+    annee_scolaire: str = "1ère année"
     professeur_id: Optional[str] = None
 
 
@@ -251,23 +251,22 @@ async def get_emplois(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Liste tous les créneaux de toutes les classes."""
-    classes = ["1A", "1B", "1C", "2A", "2B", "2C", "3A", "3B", "3C"]
-    result  = {}
-    for classe in classes:
-        emplois = get_emplois_by_classe(db, classe)
-        result[classe] = []
-        for e in emplois:
-            matiere = get_matiere_by_id(db, str(e.matiere_id))
-            result[classe].append({
-                "id":          str(e.id),
-                "matiere":     matiere.nom if matiere else "?",
-                "matiere_id":  str(e.matiere_id),
-                "jour":        e.jour,
-                "heure_debut": str(e.heure_debut),
-                "heure_fin":   str(e.heure_fin),
-                "salle":       e.salle,
-            })
+    """Liste tous les créneaux — liste plate avec niveau depuis la matière."""
+    emplois = db.query(EmploiTemps).order_by(EmploiTemps.jour, EmploiTemps.heure_debut).all()
+    result  = []
+    for e in emplois:
+        matiere = get_matiere_by_id(db, str(e.matiere_id))
+        result.append({
+            "id":            str(e.id),
+            "matiere":       matiere.nom           if matiere else "?",
+            "matiere_id":    str(e.matiere_id),
+            "niveau":        matiere.annee_scolaire if matiere else "?",
+            "groupe":        e.classe,
+            "jour":          e.jour,
+            "heure_debut":   str(e.heure_debut),
+            "heure_fin":     str(e.heure_fin),
+            "salle":         e.salle,
+        })
     return result
 
 

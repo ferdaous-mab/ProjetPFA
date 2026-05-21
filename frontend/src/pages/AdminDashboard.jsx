@@ -10,13 +10,8 @@ import VoiceAssistant from "../components/VoiceAssistant";
 const API_URL = "";
 const COLORS  = ["#6366f1", "#ef4444", "#f59e0b", "#22c55e"];
 const JOURS   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
-const NIVEAUX = [
-  { label: "1ère Année",  classes: ["1A", "1B", "1C"] },
-  { label: "2ème Année",  classes: ["2A", "2B", "2C"] },
-  { label: "3ème Année",  classes: ["3A", "3B", "3C"] },
-];
-const CLASSES = NIVEAUX.flatMap(n => n.classes);
-const getNiveau = (classe) => NIVEAUX.find(n => n.classes.includes(classe))?.label || "Autre";
+const NIVEAUX = ["1ère année", "2ème année", "3ème année", "4ème année", "5ème année"];
+const GROUPES = ["A", "B", "C", "D"];
 
 function authHeaders() {
   const token = localStorage.getItem("token");
@@ -140,14 +135,14 @@ export default function AdminDashboard({ user, onLogout }) {
   // Gestion state
   const [profs,     setProfs]     = useState([]);
   const [matieres,  setMatieres]  = useState([]);
-  const [emplois,   setEmplois]   = useState({});
+  const [emplois,   setEmplois]   = useState([]);
   const [etudiants, setEtudiants] = useState([]);
   const [gTab,      setGTab]      = useState("profs");
   const [formProf,  setFormProf]  = useState({ nom:"", prenom:"", email:"" });
   const [createdPassword, setCreatedPassword] = useState("");
   const [resetPasswords, setResetPasswords] = useState({});  // { prof_id: "generated_password" }
-  const [formMat,   setFormMat]   = useState({ nom:"", code:"", coefficient:"1", annee_scolaire:"2025-2026", niveau:"1ère Année", classe:"1A", professeur_id:"" });
-  const [formEmploi,setFormEmploi]= useState({ matiere_id:"", niveau:"1ère Année", classe:"1A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
+  const [formMat,   setFormMat]   = useState({ nom:"", code:"", coefficient:"1", annee_scolaire:"1ère année", professeur_id:"" });
+  const [formEmploi,setFormEmploi]= useState({ matiere_id:"", annee_scolaire:"1ère année", classe:"A", jour:"Lundi", heure_debut:"08:30", heure_fin:"10:30", salle:"" });
   const [msg,       setMsg]       = useState("");
 
   // Modal étudiant
@@ -160,9 +155,13 @@ export default function AdminDashboard({ user, onLogout }) {
   const [linkTarget,    setLinkTarget]    = useState(null);
   const [linkStudentId, setLinkStudentId] = useState("");
   const [profilTarget,  setProfilTarget]  = useState(null);
-  const [profilForm,    setProfilForm]    = useState({ classe: "1A", annee_scolaire: "2025-2026" });
+  const [profilForm,    setProfilForm]    = useState({ annee_scolaire: "1ère année", classe: "A" });
 
-  // Recherche / filtres étudiants
+  // Filtre global (toujours visible)
+  const [gf, setGf] = useState({ annee: "", niveau: "", classe: "" });
+  const [filterOptions, setFilterOptions] = useState({ groupes: [], classes: [], classe_groupes: {} });
+
+  // Recherche / filtres étudiants (section gestion)
   const [searchEtudiant, setSearchEtudiant] = useState("");
   const [filterClasse,   setFilterClasse]   = useState("");
   const [filterStatut,   setFilterStatut]   = useState("");
@@ -182,24 +181,34 @@ export default function AdminDashboard({ user, onLogout }) {
   const [formAlerte, setFormAlerte] = useState({ message:"", type:"information", severity:"medium", cible:"etudiant", student_id:"", classe:"" });
   const [alerteMsg,  setAlerteMsg]  = useState("");
 
-  useEffect(() => { loadBI(); }, []);
+  useEffect(() => {
+    // Charge les options de filtres une seule fois au démarrage
+    axios.get(`${API_URL}/api/bi/filtres`, authHeaders())
+      .then(r => setFilterOptions(r.data))
+      .catch(() => {});
+  }, []);
+  useEffect(() => { loadBI(); }, [gf]);
   useEffect(() => { if (activeTab === "gestion") loadGestion(); }, [activeTab]);
   useEffect(() => { if (activeTab === "gestion" && gTab === "notes")    loadNotes();    }, [gTab]);
   useEffect(() => { if (activeTab === "gestion" && gTab === "sessions") loadSessions(); }, [gTab]);
 
   const loadBI = async () => {
     setLoading(true);
+    const p = [];
+    if (gf.classe)  p.push(`classe=${encodeURIComponent(gf.classe)}`);
+    if (gf.niveau)  p.push(`annee_scolaire=${encodeURIComponent(gf.niveau)}`);
+    const qs = p.length ? `?${p.join("&")}` : "";
     try {
       const [ov, pc, pm, ev, rp, rq, ta, nm, al] = await Promise.all([
-        axios.get(`${API_URL}/api/bi/overview`,             authHeaders()),
-        axios.get(`${API_URL}/api/bi/presence-par-classe`,  authHeaders()),
-        axios.get(`${API_URL}/api/bi/presence-par-matiere`, authHeaders()),
-        axios.get(`${API_URL}/api/bi/evolution-presences`,  authHeaders()),
-        axios.get(`${API_URL}/api/bi/repartition-statuts`,  authHeaders()),
-        axios.get(`${API_URL}/api/bi/etudiants-a-risque`,   authHeaders()),
-        axios.get(`${API_URL}/api/bi/top-absences`,         authHeaders()),
-        axios.get(`${API_URL}/api/bi/notes-par-matiere`,    authHeaders()),
-        axios.get(`${API_URL}/api/bi/alertes-recentes`,     authHeaders()),
+        axios.get(`${API_URL}/api/bi/overview${qs}`,             authHeaders()),
+        axios.get(`${API_URL}/api/bi/presence-par-classe${qs}`,  authHeaders()),
+        axios.get(`${API_URL}/api/bi/presence-par-matiere${qs}`, authHeaders()),
+        axios.get(`${API_URL}/api/bi/evolution-presences${qs}`,  authHeaders()),
+        axios.get(`${API_URL}/api/bi/repartition-statuts${qs}`,  authHeaders()),
+        axios.get(`${API_URL}/api/bi/etudiants-a-risque${qs}`,   authHeaders()),
+        axios.get(`${API_URL}/api/bi/top-absences${qs}`,         authHeaders()),
+        axios.get(`${API_URL}/api/bi/notes-par-matiere${qs}`,    authHeaders()),
+        axios.get(`${API_URL}/api/bi/alertes-recentes${qs}`,     authHeaders()),
       ]);
       setOverview(ov.data);
       setPresClasse(pc.data);
@@ -365,7 +374,7 @@ export default function AdminDashboard({ user, onLogout }) {
       const payload = { ...formMat, coefficient: parseFloat(formMat.coefficient) };
       await axios.post(`${API_URL}/api/gestion/matieres`, payload, authHeaders());
       showMsg("✅ Matière créée !");
-      setFormMat({ nom:"", code:"", coefficient:"1", annee_scolaire:"2025-2026", niveau:"1ère Année", classe:"1A", professeur_id:"" });
+      setFormMat({ nom:"", code:"", coefficient:"1", annee_scolaire:"1ère année", professeur_id:"" });
       loadGestion();
     } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
   };
@@ -379,7 +388,9 @@ export default function AdminDashboard({ user, onLogout }) {
 
   const addEmploi = async () => {
     try {
-      await axios.post(`${API_URL}/api/gestion/emplois`, formEmploi, authHeaders());
+      // annee_scolaire est uniquement pour le filtre UI, pas envoyé au backend
+      const { annee_scolaire: _nv, ...payload } = formEmploi;
+      await axios.post(`${API_URL}/api/gestion/emplois`, payload, authHeaders());
       showMsg("✅ Créneau ajouté !");
       loadGestion();
     } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
@@ -528,15 +539,27 @@ export default function AdminDashboard({ user, onLogout }) {
     { id: "sessions",  label: "Sessions",        icon: "🎬" },
   ];
 
+  // Options dynamiques depuis le backend (disponibles sur tous les onglets)
+  const uniqueGroupes = filterOptions.groupes;
+  const uniqueClasses = gf.niveau
+    ? filterOptions.classes.filter(cl =>
+        (filterOptions.classe_groupes[cl] || []).includes(gf.niveau)
+      )
+    : filterOptions.classes;
+
+  // presClasse est déjà filtré côté backend, pas besoin de filtre client supplémentaire
+  const presClasseFiltree = presClasse;
+
   const etudiantsFiltres = etudiants.filter(e => {
+    const matchNiveau  = !gf.niveau || e.annee_scolaire === gf.niveau;
+    const matchGClasse = !gf.classe || e.classe === gf.classe;
     const q = searchEtudiant.toLowerCase();
     const matchSearch = !q || `${e.prenom} ${e.nom} ${e.email}`.toLowerCase().includes(q);
-    const matchClasse = !filterClasse || e.classe === filterClasse;
     const matchStatut = !filterStatut
       || (filterStatut === "actif"       && e.has_account  && e.account_active)
       || (filterStatut === "inactif"     && e.has_account  && !e.account_active)
       || (filterStatut === "sans_compte" && !e.has_account);
-    return matchSearch && matchClasse && matchStatut;
+    return matchNiveau && matchGClasse && matchSearch && matchStatut;
   });
 
   const severityColor = s =>
@@ -799,29 +822,90 @@ export default function AdminDashboard({ user, onLogout }) {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="tabs-scroll" style={{
-        padding: bp.isMobile ? "10px 12px 0" : "16px 24px 0",
+      {/* Tabs + Filtres intégrés */}
+      <div style={{
+        padding: bp.isMobile ? "10px 12px 0" : "0 24px 0",
         borderBottom: "1px solid rgba(255,255,255,0.07)",
-        display: "flex", flexDirection: "row", flexWrap: "nowrap",
-        overflowX: "auto", gap: 2,
+        display: "flex", alignItems: "flex-end", gap: 0,
       }}>
-        {tabs.map(tab => (
-          <button key={tab.id} className="tab-btn" onClick={() => setActiveTab(tab.id)} style={{
-            background: activeTab === tab.id ? "rgba(99,102,241,0.15)" : "transparent",
-            border: "none",
-            borderBottom: activeTab === tab.id ? "2px solid #6366f1" : "2px solid transparent",
-            color: activeTab === tab.id ? "#6366f1" : "rgba(255,255,255,0.4)",
-            cursor: "pointer", padding: bp.isMobile ? "8px 10px" : "10px 16px",
-            fontFamily: "Sora, sans-serif", fontSize: bp.isMobile ? 12 : 13,
-            fontWeight: activeTab === tab.id ? 600 : 400,
-            borderRadius: "8px 8px 0 0",
-            display: "flex", alignItems: "center", gap: 5,
+        {/* Tabs (gauche, scrollable) */}
+        <div style={{ display: "flex", overflowX: "auto", gap: 2, flex: 1, paddingTop: bp.isMobile ? 0 : 14 }}>
+          {tabs.map(tab => (
+            <button key={tab.id} className="tab-btn" onClick={() => setActiveTab(tab.id)} style={{
+              background: activeTab === tab.id ? "rgba(99,102,241,0.15)" : "transparent",
+              border: "none",
+              borderBottom: activeTab === tab.id ? "2px solid #6366f1" : "2px solid transparent",
+              color: activeTab === tab.id ? "#6366f1" : "rgba(255,255,255,0.4)",
+              cursor: "pointer", padding: bp.isMobile ? "8px 10px" : "10px 16px",
+              fontFamily: "Sora, sans-serif", fontSize: bp.isMobile ? 12 : 13,
+              fontWeight: activeTab === tab.id ? 600 : 400,
+              borderRadius: "8px 8px 0 0", whiteSpace: "nowrap",
+              display: "flex", alignItems: "center", gap: 5,
+            }}>
+              {tab.icon}{!bp.isMobile && " "}{!bp.isMobile && tab.label}
+              {bp.isMobile && <span style={{ fontSize: 10, marginLeft: 2 }}>{tab.label.split(" ")[0]}</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* Filtres (droite, inline) — masqués sur mobile */}
+        {!bp.isMobile && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            paddingBottom: 10, paddingLeft: 16, flexShrink: 0,
+            borderLeft: "1px solid rgba(255,255,255,0.06)", marginLeft: 8,
           }}>
-            {tab.icon}{!bp.isMobile && " "}{!bp.isMobile && tab.label}
-            {bp.isMobile && <span style={{ fontSize: 10, marginLeft: 2 }}>{tab.label.split(" ")[0]}</span>}
-          </button>
-        ))}
+            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", fontWeight: 600,
+              letterSpacing: "0.08em", textTransform: "uppercase", marginRight: 2 }}>
+              Scope
+            </span>
+
+            {/* Dropdown niveau */}
+            <select value={gf.niveau}
+              onChange={e => setGf(f => ({...f, niveau: e.target.value, classe: ""}))}
+              style={{
+                height: 28, padding: "0 10px", fontSize: 11,
+                background: gf.niveau ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.04)",
+                border: gf.niveau ? "1px solid rgba(99,102,241,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 8, outline: "none", cursor: "pointer",
+                color: gf.niveau ? "#a5b4fc" : "rgba(255,255,255,0.35)",
+                fontFamily: "Sora, sans-serif", fontWeight: gf.niveau ? 600 : 400,
+                maxWidth: 140,
+              }}>
+              <option value="" style={{ background: "#0d0d1a" }}>Niveau</option>
+              {NIVEAUX.map(n => (
+                <option key={n} value={n} style={{ background: "#0d0d1a" }}>{n}</option>
+              ))}
+            </select>
+
+            {/* Dropdown classe */}
+            <select value={gf.classe}
+              onChange={e => setGf(f => ({...f, classe: e.target.value}))}
+              style={{
+                height: 28, padding: "0 10px", fontSize: 11,
+                background: gf.classe ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.04)",
+                border: gf.classe ? "1px solid rgba(99,102,241,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 8, outline: "none", cursor: "pointer",
+                color: gf.classe ? "#a5b4fc" : "rgba(255,255,255,0.35)",
+                fontFamily: "Sora, sans-serif", fontWeight: gf.classe ? 600 : 400,
+                maxWidth: 90,
+              }}>
+              <option value="" style={{ background: "#0d0d1a" }}>Groupe</option>
+              {GROUPES.map(g => <option key={g} value={g} style={{ background: "#0d0d1a" }}>Groupe {g}</option>)}
+            </select>
+
+            {/* Bouton reset — apparaît uniquement si un filtre est actif */}
+            {(gf.niveau || gf.classe) && (
+              <button onClick={() => setGf({ annee:"", niveau:"", classe:"" })} style={{
+                width: 24, height: 24, border: "1px solid rgba(239,68,68,0.3)",
+                borderRadius: 6, background: "rgba(239,68,68,0.1)",
+                color: "#ef4444", cursor: "pointer", fontSize: 12,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "Sora, sans-serif", flexShrink: 0,
+              }}>✕</button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="page-body">
@@ -853,9 +937,9 @@ export default function AdminDashboard({ user, onLogout }) {
             <div style={{ display: "grid", gridTemplateColumns: bp.cols2, gap: bp.gap }}>
               <Card>
                 <SectionTitle title="Présence par classe" icon="📊" />
-                {presClasse.length === 0 ? <EmptyState message="Aucune donnée" /> :
+                {presClasseFiltree.length === 0 ? <EmptyState message="Aucune donnée" /> :
                   <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={presClasse}>
+                    <BarChart data={presClasseFiltree}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                       <XAxis dataKey="classe" stroke="rgba(255,255,255,0.3)" fontSize={12} />
                       <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} unit="%" />
@@ -1222,31 +1306,20 @@ export default function AdminDashboard({ user, onLogout }) {
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <Input placeholder="Nom de la matière" value={formMat.nom}
                       onChange={e => setFormMat({...formMat, nom: e.target.value})} />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                       <Input placeholder="Code (ex: BI)" value={formMat.code}
                         onChange={e => setFormMat({...formMat, code: e.target.value})} />
                       <Input placeholder="Coefficient" type="number" value={formMat.coefficient}
                         onChange={e => setFormMat({...formMat, coefficient: e.target.value})} />
-                      <Input placeholder="Année (ex: 2025-2026)" value={formMat.annee_scolaire}
-                        onChange={e => setFormMat({...formMat, annee_scolaire: e.target.value})} />
                     </div>
-                    <Select value={formMat.niveau}
-                      onChange={e => {
-                        const nv = NIVEAUX.find(n => n.label === e.target.value);
-                        setFormMat({...formMat, niveau: e.target.value, classe: nv?.classes[0] || ""});
-                      }}>
-                      {NIVEAUX.map(n => <option key={n.label} value={n.label}>{n.label}</option>)}
-                    </Select>
-                    <Select value={formMat.classe}
-                      onChange={e => setFormMat({...formMat, classe: e.target.value})}>
-                      {(NIVEAUX.find(n => n.label === formMat.niveau)?.classes || []).map(c => (
-                        <option key={c} value={c}>Classe {c}</option>
-                      ))}
+                    <Select value={formMat.annee_scolaire}
+                      onChange={e => setFormMat({...formMat, annee_scolaire: e.target.value})}>
+                      {NIVEAUX.map(n => <option key={n} value={n}>{n}</option>)}
                     </Select>
                     <Select value={formMat.professeur_id}
                       onChange={e => setFormMat({...formMat, professeur_id: e.target.value})}>
                       <option value="">-- Assigner un professeur --</option>
-                      {profs.map(p => (
+                      {profs.filter(p => p.is_active).map(p => (
                         <option key={p.id} value={p.id}>{p.prenom} {p.nom}</option>
                       ))}
                     </Select>
@@ -1257,22 +1330,22 @@ export default function AdminDashboard({ user, onLogout }) {
                   <SectionTitle title={`Matières (${matieres.length})`} icon="📚" />
                   {matieres.length === 0 ? <EmptyState message="Aucune matière" /> :
                     NIVEAUX.map(nv => {
-                      const matieresDuNiveau = matieres.filter(m => nv.classes.includes(m.classe));
-                      if (matieresDuNiveau.length === 0) return null;
+                      const ms = matieres.filter(m => m.annee_scolaire === nv);
+                      if (ms.length === 0) return null;
                       return (
-                        <div key={nv.label}>
+                        <div key={nv}>
                           <div style={{
                             fontSize: 11, fontWeight: 700, color: "#6366f1",
                             letterSpacing: "0.06em", textTransform: "uppercase",
-                            margin: "14px 0 6px", padding: "4px 8px",
+                            margin: "14px 0 6px", padding: "4px 10px",
                             background: "rgba(99,102,241,0.08)", borderRadius: 6,
                             display: "inline-block",
-                          }}>{nv.label}</div>
-                          {matieresDuNiveau.map((m, i) => (
+                          }}>{nv}</div>
+                          {ms.map((m, i) => (
                             <div key={i} style={{
                               display: "flex", alignItems: "center", justifyContent: "space-between",
                               padding: "10px 0",
-                              borderBottom: i < matieresDuNiveau.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                              borderBottom: i < ms.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
                             }}>
                               <div>
                                 <div style={{ fontWeight: 500, fontSize: 14 }}>
@@ -1280,14 +1353,7 @@ export default function AdminDashboard({ user, onLogout }) {
                                   <span style={{ marginLeft: 8, color: "#6366f1", fontSize: 11 }}>Coef {m.coefficient}</span>
                                 </div>
                                 <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
-                                  Classe {m.classe}
-                                  {m.annee_scolaire && (
-                                    <span style={{ marginLeft: 6, background: "rgba(14,165,233,0.15)",
-                                      color: "#0ea5e9", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>
-                                      {m.annee_scolaire}
-                                    </span>
-                                  )}
-                                  {" · "}{m.professeur || "Aucun prof"}
+                                  {m.professeur || "Aucun prof"}
                                 </div>
                               </div>
                               <Btn onClick={() => deleteMat(m.id)} color="#ef4444"
@@ -1303,23 +1369,31 @@ export default function AdminDashboard({ user, onLogout }) {
             )}
 
             {/* Emploi du temps */}
-            {gTab === "emplois" && (
+            {gTab === "emplois" && (() => {
+              // Grouper les créneaux par niveau puis par groupe
+              const emploisGrouped = {};
+              emplois.forEach(e => {
+                const nv = e.niveau || "Autre";
+                if (!emploisGrouped[nv]) emploisGrouped[nv] = {};
+                if (!emploisGrouped[nv][e.groupe]) emploisGrouped[nv][e.groupe] = [];
+                emploisGrouped[nv][e.groupe].push(e);
+              });
+              // Matieres filtrées par niveau + groupe sélectionnés dans le formulaire
+              const matieresFiltrees = matieres.filter(m =>
+                m.annee_scolaire === formEmploi.annee_scolaire
+              );
+              return (
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 <Card>
                   <SectionTitle title="Ajouter un créneau" icon="➕" />
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-                    <Select value={formEmploi.niveau}
-                      onChange={e => {
-                        const nv = NIVEAUX.find(n => n.label === e.target.value);
-                        setFormEmploi({...formEmploi, niveau: e.target.value, classe: nv?.classes[0] || "", matiere_id: ""});
-                      }}>
-                      {NIVEAUX.map(n => <option key={n.label} value={n.label}>{n.label}</option>)}
+                    <Select value={formEmploi.annee_scolaire}
+                      onChange={e => setFormEmploi({...formEmploi, annee_scolaire: e.target.value, matiere_id: ""})}>
+                      {NIVEAUX.map(n => <option key={n} value={n}>{n}</option>)}
                     </Select>
                     <Select value={formEmploi.classe}
                       onChange={e => setFormEmploi({...formEmploi, classe: e.target.value, matiere_id: ""})}>
-                      {(NIVEAUX.find(n => n.label === formEmploi.niveau)?.classes || []).map(c => (
-                        <option key={c} value={c}>Classe {c}</option>
-                      ))}
+                      {GROUPES.map(g => <option key={g} value={g}>Groupe {g}</option>)}
                     </Select>
                     <Select value={formEmploi.jour}
                       onChange={e => setFormEmploi({...formEmploi, jour: e.target.value})}>
@@ -1328,7 +1402,7 @@ export default function AdminDashboard({ user, onLogout }) {
                     <Select value={formEmploi.matiere_id}
                       onChange={e => setFormEmploi({...formEmploi, matiere_id: e.target.value})}>
                       <option value="">-- Matière --</option>
-                      {matieres.filter(m => m.classe === formEmploi.classe).map(m => (
+                      {matieresFiltrees.map(m => (
                         <option key={m.id} value={m.id}>{m.nom}</option>
                       ))}
                     </Select>
@@ -1341,56 +1415,59 @@ export default function AdminDashboard({ user, onLogout }) {
                   </div>
                   <Btn onClick={addEmploi} style={{ marginTop: 12 }}>Ajouter le créneau</Btn>
                 </Card>
-                {NIVEAUX.map(nv => (
-                  <div key={nv.label}>
-                    <div style={{
-                      fontSize: 13, fontWeight: 700, color: "#6366f1",
-                      margin: "4px 0 12px", display: "flex", alignItems: "center", gap: 8,
-                    }}>
-                      <div style={{ flex: 1, height: 1, background: "rgba(99,102,241,0.2)" }} />
-                      {nv.label}
-                      <div style={{ flex: 1, height: 1, background: "rgba(99,102,241,0.2)" }} />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      {nv.classes.map(classe => (
-                        <Card key={classe}>
-                          <SectionTitle title={`Classe ${classe}`} icon="📅" />
-                          {!emplois[classe] || emplois[classe].length === 0
-                            ? <EmptyState message={`Aucun créneau pour la classe ${classe}`} />
-                            : <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                                <thead>
-                                  <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                                    {["Jour","Matière","Horaire","Salle","Action"].map(h => (
-                                      <th key={h} style={{ padding: "8px 12px", textAlign: "left",
-                                        color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {emplois[classe].map((e, i) => (
-                                    <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                                      <td style={{ padding: "8px 12px", fontSize: 13 }}>{e.jour}</td>
-                                      <td style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500 }}>{e.matiere}</td>
-                                      <td style={{ padding: "8px 12px", fontSize: 12,
-                                        color: "rgba(255,255,255,0.5)" }}>{e.heure_debut} → {e.heure_fin}</td>
-                                      <td style={{ padding: "8px 12px", fontSize: 12,
-                                        color: "rgba(255,255,255,0.5)" }}>{e.salle || "-"}</td>
-                                      <td style={{ padding: "8px 12px" }}>
-                                        <Btn onClick={() => deleteEmploi(e.id)} color="#ef4444"
-                                          style={{ padding: "4px 10px", fontSize: 11 }}>Supprimer</Btn>
-                                      </td>
-                                    </tr>
+
+                {/* Affichage groupé par niveau puis par groupe */}
+                {NIVEAUX.map(nv => {
+                  const groupesNv = emploisGrouped[nv];
+                  if (!groupesNv) return null;
+                  return (
+                    <div key={nv}>
+                      <div style={{
+                        fontSize: 13, fontWeight: 700, color: "#6366f1",
+                        margin: "4px 0 12px", display: "flex", alignItems: "center", gap: 8,
+                      }}>
+                        <div style={{ flex: 1, height: 1, background: "rgba(99,102,241,0.2)" }} />
+                        {nv}
+                        <div style={{ flex: 1, height: 1, background: "rgba(99,102,241,0.2)" }} />
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {GROUPES.filter(g => groupesNv[g]?.length > 0).map(gr => (
+                          <Card key={gr}>
+                            <SectionTitle title={`Groupe ${gr}`} icon="📅" />
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead>
+                                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                                  {["Jour","Matière","Horaire","Salle","Action"].map(h => (
+                                    <th key={h} style={{ padding: "8px 12px", textAlign: "left",
+                                      color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{h}</th>
                                   ))}
-                                </tbody>
-                              </table>
-                          }
-                        </Card>
-                      ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {groupesNv[gr].map((e, i) => (
+                                  <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                                    <td style={{ padding: "8px 12px", fontSize: 13 }}>{e.jour}</td>
+                                    <td style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500 }}>{e.matiere}</td>
+                                    <td style={{ padding: "8px 12px", fontSize: 12,
+                                      color: "rgba(255,255,255,0.5)" }}>{e.heure_debut?.slice(0,5)} → {e.heure_fin?.slice(0,5)}</td>
+                                    <td style={{ padding: "8px 12px", fontSize: 12,
+                                      color: "rgba(255,255,255,0.5)" }}>{e.salle || "—"}</td>
+                                    <td style={{ padding: "8px 12px" }}>
+                                      <Btn onClick={() => deleteEmploi(e.id)} color="#ef4444"
+                                        style={{ padding: "4px 10px", fontSize: 11 }}>Supprimer</Btn>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </Card>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-            )}
+            );})()}
 
             {/* Étudiants */}
             {gTab === "etudiants" && (
@@ -1414,22 +1491,21 @@ export default function AdminDashboard({ user, onLogout }) {
                 </div>
 
                 <Card>
-                  {/* Barre de recherche + filtres + export */}
-                  <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
-                    <Input placeholder="🔍 Rechercher par nom, prénom, email..." value={searchEtudiant}
-                      onChange={e => setSearchEtudiant(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
-                    <Select value={filterClasse} onChange={e => setFilterClasse(e.target.value)} style={{ width: 110 }}>
-                      <option value="">Toutes classes</option>
-                      {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </Select>
-                    <Select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ width: 140 }}>
+                  {/* Barre de recherche compacte */}
+                  <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+                    <Input placeholder="Rechercher nom, prénom, email…" value={searchEtudiant}
+                      onChange={e => setSearchEtudiant(e.target.value)}
+                      style={{ flex: 1, maxWidth: 340, padding: "7px 12px", fontSize: 12 }} />
+                    <Select value={filterStatut} onChange={e => setFilterStatut(e.target.value)}
+                      style={{ width: 130, padding: "7px 10px", fontSize: 12 }}>
                       <option value="">Tous statuts</option>
                       <option value="actif">Compte actif</option>
                       <option value="inactif">Compte inactif</option>
                       <option value="sans_compte">Sans compte</option>
                     </Select>
                     <Btn onClick={exportEtudiants} color="rgba(34,197,94,0.2)"
-                      style={{ border: "1px solid rgba(34,197,94,0.4)", color: "#22c55e", padding: "8px 14px", fontSize: 12, flexShrink: 0 }}>
+                      style={{ border: "1px solid rgba(34,197,94,0.4)", color: "#22c55e",
+                        padding: "7px 14px", fontSize: 12, flexShrink: 0 }}>
                       ⬇ CSV
                     </Btn>
                   </div>
@@ -1621,19 +1697,17 @@ export default function AdminDashboard({ user, onLogout }) {
                             borderTop: "1px solid rgba(34,197,94,0.2)",
                             display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
                           }}>
-                            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>Classe :</span>
-                            <Select value={profilForm.classe}
-                              onChange={e => setProfilForm(f => ({ ...f, classe: e.target.value }))}
-                              style={{ width: 90, fontSize: 12, padding: "6px 8px" }}>
-                              {["1A","1B","1C","2A","2B","2C","3A","3B","3C"].map(c =>
-                                <option key={c} value={c}>{c}</option>)}
-                            </Select>
-                            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>Année :</span>
+                            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>Niveau :</span>
                             <Select value={profilForm.annee_scolaire}
                               onChange={e => setProfilForm(f => ({ ...f, annee_scolaire: e.target.value }))}
-                              style={{ width: 130, fontSize: 12, padding: "6px 8px" }}>
-                              {["2024-2025","2025-2026","2026-2027"].map(a =>
-                                <option key={a} value={a}>{a}</option>)}
+                              style={{ width: 140, fontSize: 12, padding: "6px 8px" }}>
+                              {NIVEAUX.map(n => <option key={n} value={n}>{n}</option>)}
+                            </Select>
+                            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>Groupe :</span>
+                            <Select value={profilForm.classe}
+                              onChange={e => setProfilForm(f => ({ ...f, classe: e.target.value }))}
+                              style={{ width: 80, fontSize: 12, padding: "6px 8px" }}>
+                              {GROUPES.map(g => <option key={g} value={g}>Gr. {g}</option>)}
                             </Select>
                             <Btn onClick={creerProfilOrphelin} color="#22c55e"
                               style={{ padding: "6px 12px", fontSize: 12 }}>Confirmer</Btn>
@@ -1855,7 +1929,7 @@ export default function AdminDashboard({ user, onLogout }) {
                         <Select value={formAlerte.classe}
                           onChange={e => setFormAlerte(f => ({...f, classe: e.target.value}))}>
                           <option value="">-- Choisir une classe --</option>
-                          {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                          {filterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
                         </Select>
                       )}
                     </div>
@@ -1915,7 +1989,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <Select value={filterSClasse} onChange={e => setFilterSClasse(e.target.value)} style={{ width: 130 }}>
                     <option value="">Toutes classes</option>
-                    {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {filterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
                   </Select>
                   <Select value={filterSMatiere} onChange={e => setFilterSMatiere(e.target.value)} style={{ flex: 1, minWidth: 180 }}>
                     <option value="">Toutes matières</option>

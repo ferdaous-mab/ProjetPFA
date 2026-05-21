@@ -24,12 +24,12 @@ const ACTION_LABELS = {
 
 const ACTION_REQUIRED = {
   create_professor: ["prenom", "nom", "email"],
-  create_matiere:   ["nom", "classe", "coefficient"],
+  create_matiere:   ["nom", "annee_scolaire", "coefficient"],
 };
 
 const PARAM_LABELS = {
   nom: "Nom", prenom: "Prénom", email: "Email",
-  classe: "Classe", coefficient: "Coefficient",
+  annee_scolaire: "Niveau", coefficient: "Coefficient",
 };
 
 const INCOMPLETE_HINTS = {

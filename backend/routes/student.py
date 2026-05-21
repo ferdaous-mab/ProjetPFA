@@ -137,9 +137,17 @@ async def student_emploi_du_temps(
     if not student or not student.classe:
         return []
 
-    slots = db.query(EmploiTemps).filter(
-        EmploiTemps.classe == student.classe
-    ).order_by(EmploiTemps.jour, EmploiTemps.heure_debut).all()
+    # Filtre par niveau (annee_scolaire de la matière) ET groupe (classe de la matière)
+    slots = (
+        db.query(EmploiTemps)
+        .join(Matiere, EmploiTemps.matiere_id == Matiere.id)
+        .filter(
+            Matiere.annee_scolaire == student.annee_scolaire,
+            Matiere.classe         == student.classe,
+        )
+        .order_by(EmploiTemps.jour, EmploiTemps.heure_debut)
+        .all()
+    )
 
     JOURS_ORDER = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
 

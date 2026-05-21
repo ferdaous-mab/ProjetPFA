@@ -6,6 +6,7 @@ from auth.dependencies import admin_only, admin_or_prof, get_db
 import httpx
 import os
 import re
+import json
 import asyncio
 from dotenv import load_dotenv
 
@@ -13,7 +14,8 @@ load_dotenv(override=True)
 
 router = APIRouter()
 
-ASSEMBLYAI_KEY = os.getenv("ASSEMBLYAI_API_KEY", "")
+ASSEMBLYAI_KEY  = os.getenv("ASSEMBLYAI_API_KEY", "")
+ANTHROPIC_KEY   = os.getenv("ANTHROPIC_API_KEY", "")
 
 
 class ChatRequest(BaseModel):
@@ -158,28 +160,145 @@ def extract_professor_params(message: str) -> dict:
     return params
 
 
-def extract_matiere_params(message: str) -> dict:
-    params = {}
-    # Classe
-    classe_match = re.search(r'\bclasse\s*[:\s]*([ABC])\b', message, re.IGNORECASE)
-    params["classe"] = classe_match.group(1).upper() if classe_match else "A"
-    # Coefficient
-    coef_match = re.search(r'(?:coefficient|coeff?|coef)\s*[:\s]*(\d+(?:[.,]\d+)?)', message, re.IGNORECASE)
-    params["coefficient"] = float(coef_match.group(1).replace(',', '.')) if coef_match else 1.0
-    # Nom de la matière
-    name_match = re.search(
-        r'(?:mati[eè]re|cours|module)\s+(?:de\s+|d\')?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)(?:\s+(?:pour|de la classe|classe|coeff|coefficient|avec)|$)',
-        message, re.IGNORECASE
-    )
-    if name_match:
-        params["nom"] = name_match.group(1).strip().title()
-    else:
-        name_match2 = re.search(
-            r"(?:appel[lé][e]?|s'appelle|nommée?)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)(?:\s+(?:pour|classe)|$)",
-            message, re.IGNORECASE
+NIVEAU_MAP = {
+    "1": "1ère année", "première": "1ère année", "premières": "1ère année",
+    "premier": "1ère année", "premiers": "1ère année",
+    "1ère": "1ère année", "1ere": "1ère année",
+    "première année": "1ère année", "premières années": "1ère année",
+    "2": "2ème année", "deuxième": "2ème année", "deuxièmes": "2ème année",
+    "deuxieme": "2ème année", "2ème": "2ème année", "2eme": "2ème année",
+    "deuxième année": "2ème année", "deuxièmes années": "2ème année",
+    "3": "3ème année", "troisième": "3ème année", "troisièmes": "3ème année",
+    "troisieme": "3ème année", "3ème": "3ème année", "3eme": "3ème année",
+    "troisième année": "3ème année", "troisièmes années": "3ème année",
+    "4": "4ème année", "quatrième": "4ème année", "quatrièmes": "4ème année",
+    "quatrieme": "4ème année", "4ème": "4ème année", "4eme": "4ème année",
+    "quatrième année": "4ème année", "quatrièmes années": "4ème année",
+    "5": "5ème année", "cinquième": "5ème année", "cinquièmes": "5ème année",
+    "cinquieme": "5ème année", "5ème": "5ème année", "5eme": "5ème année",
+    "cinquième année": "5ème année", "cinquièmes années": "5ème année",
+}
+
+_STOP = r'(?=\s+(?:et\s+(?:le|la|il)|avec|pour|coeff?|coefficient|\d)|[,.]|$)'
+
+_NIVEAUX_VALIDES = ["1ère année", "2ème année", "3ème année", "4ème année", "5ème année"]
+
+def extract_matiere_params_llm(message: str) -> dict:
+    """Utilise Claude pour extraire les paramètres d'une matière depuis du langage naturel."""
+    if not ANTHROPIC_KEY:
+        return {}
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+        prompt = f"""Extrait les informations d'une matière scolaire depuis cette phrase en français.
+Réponds UNIQUEMENT avec du JSON valide, rien d'autre.
+
+Champs à extraire :
+- "nom" : le nom de la matière (ex: "Mathématiques", "Algorithmique", "Physique")
+- "annee_scolaire" : le niveau, OBLIGATOIREMENT l'une de ces valeurs exactes : {_NIVEAUX_VALIDES}
+- "coefficient" : un nombre (défaut 1 si non mentionné)
+
+Si un champ est absent de la phrase, ne l'inclus pas dans le JSON.
+
+Phrase : "{message}"
+
+JSON :"""
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}]
         )
-        if name_match2:
-            params["nom"] = name_match2.group(1).strip().title()
+        raw = response.content[0].text.strip()
+        # Extraire le JSON même si du texte l'entoure
+        json_match = re.search(r'\{[^}]+\}', raw, re.DOTALL)
+        if not json_match:
+            return {}
+        data = json.loads(json_match.group())
+        result = {}
+        if "nom" in data and isinstance(data["nom"], str) and data["nom"].strip():
+            result["nom"] = data["nom"].strip().title()
+        if "annee_scolaire" in data and data["annee_scolaire"] in _NIVEAUX_VALIDES:
+            result["annee_scolaire"] = data["annee_scolaire"]
+        if "coefficient" in data:
+            try:
+                result["coefficient"] = float(data["coefficient"])
+            except (ValueError, TypeError):
+                pass
+        return result
+    except Exception as e:
+        print(f"[LLM EXTRACT] Erreur: {e}")
+        return {}
+
+
+def parse_annee_scolaire(text: str):
+    """Convertit une réponse vocale en valeur annee_scolaire normalisée."""
+    t = text.strip().lower().rstrip('.,;!?')
+    # Supprimer les expressions coefficient pour éviter les faux positifs sur les chiffres
+    t_clean = re.sub(r'(?:coefficient|coeff?|coef)[^0-9]{0,20}\d+(?:[.,]\d+)?', '', t, flags=re.IGNORECASE)
+    for key in sorted(NIVEAU_MAP, key=len, reverse=True):
+        if key in t_clean:
+            return NIVEAU_MAP[key]
+    m = re.search(r'\b([1-5])\b', t_clean)
+    if m:
+        return NIVEAU_MAP.get(m.group(1), "1ère année")
+    return None
+
+
+def _extract_name(message: str):
+    """Extrait le nom d'une matière depuis une phrase naturelle."""
+    patterns = [
+        # "le nom est X" / "nom sera X"  — en premier car le plus précis
+        r'nom\s+(?:est|sera|c\'est)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)' + _STOP,
+        # "s'appelle X", "appelée X", "nommée X"
+        r"(?:s'appelle|appel[lé][e]?|nommée?)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)" + _STOP,
+        # "c'est X"
+        r"c'est\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)" + _STOP,
+        # "matière de X" / "cours de X"  — exige "de" pour ne pas capter "matière dans..."
+        r"(?:mati[eè]re|cours|module)\s+de\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)" + _STOP,
+        r"(?:mati[eè]re|cours|module)\s+d'([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]+?)" + _STOP,
+    ]
+    for pat in patterns:
+        m = re.search(pat, message, re.IGNORECASE)
+        if m:
+            return m.group(1).strip().title()
+    return None
+
+
+def extract_matiere_params(message: str) -> dict:
+    # ── 1. Essayer Claude en priorité ─────────────────────────────────────────
+    params = extract_matiere_params_llm(message)
+    if params:
+        return params
+
+    # ── 2. Fallback regex si Claude indisponible ───────────────────────────────
+    params = {}
+    nv = parse_annee_scolaire(message)
+    if nv:
+        params["annee_scolaire"] = nv
+    classe_match = re.search(r'(?:classe|groupe)\s*[:\s]*([ABCD])\b', message, re.IGNORECASE)
+    if classe_match:
+        params["classe"] = classe_match.group(1).upper()
+    coef_match = re.search(r'(?:coefficient|coeff?|coef)[^0-9]{0,20}(\d+(?:[.,]\d+)?)', message, re.IGNORECASE)
+    if coef_match:
+        params["coefficient"] = float(coef_match.group(1).replace(',', '.'))
+    name = _extract_name(message)
+    if not name:
+        residual = re.sub(r'(?:coefficient|coeff?|coef)[^0-9]{0,20}\d+(?:[.,]\d+)?', '', message, flags=re.IGNORECASE)
+        residual = re.sub(
+            r'\b(?:\d+ème?s?|premières?|deuxièmes?|troisièmes?|quatrièmes?|cinquièmes?)\s+ann[ée]es?\b',
+            '', residual, flags=re.IGNORECASE
+        )
+        residual = re.sub(
+            r"\b(?:comment|tu|vas|je|veux|voudrais|ajouter|créer|mettre|nouvelle?|nouveau"
+            r"|une|un|la|le|les|des|du|dans|pour|avec|et|il|de|l'|l'ajouter|c'est|est|sera"
+            r"|matière|cours|module|nom|appel[lé]e?|s'appelle|nommée?)\b",
+            ' ', residual, flags=re.IGNORECASE
+        )
+        residual = ' '.join(residual.split()).strip()
+        if residual and len(residual.split()) <= 5:
+            name = residual.title()
+    if name:
+        params["nom"] = name
     return params
 
 
@@ -205,11 +324,11 @@ PROF_QUESTIONS = {
     "email":  "Quelle est son adresse email ?",
 }
 
-MATIERE_FIELDS = ["nom", "classe", "coefficient"]
+MATIERE_FIELDS = ["nom", "annee_scolaire", "coefficient"]
 MATIERE_QUESTIONS = {
-    "nom":         "Quel est le nom de la matière ?",
-    "classe":      "Pour quelle classe ? Répondez A, B ou C.",
-    "coefficient": "Quel est le coefficient ? (par défaut 1, appuyez sur Entrée pour ignorer)",
+    "nom":            "Quel est le nom de la matière ?",
+    "annee_scolaire": "Pour quel niveau ? Dites 1, 2, 3, 4 ou 5 (ex: première année, 2ème année…)",
+    "coefficient":    "Quel est le coefficient de cette matière ? (dites un nombre, ex: 1, 2, 3)",
 }
 
 CANCEL_WORDS = ["annuler", "annule", "stop", "arrêter", "arrête", "non", "quitter", "abandonner"]
@@ -221,13 +340,29 @@ def parse_field_value(field: str, message: str):
     if field == "email":
         m = re.search(r'[\w.+\-]+@[\w\-]+\.[a-zA-Z]{2,}', message)
         return m.group() if m else val.lower()
+    if field == "annee_scolaire":
+        return parse_annee_scolaire(message) or "1ère année"
     if field == "classe":
-        m = re.search(r'\b([ABC])\b', message.upper())
+        m = re.search(r'\b([ABCD])\b', message.upper())
         return m.group(1) if m else "A"
     if field == "coefficient":
         m = re.search(r'(\d+(?:[.,]\d+)?)', message)
         return float(m.group(1).replace(',', '.')) if m else 1.0
-    return val.capitalize() if field in ("prenom", "nom") else val
+    if field == "nom":
+        # Essayer Claude d'abord
+        llm = extract_matiere_params_llm(message)
+        if llm.get("nom"):
+            return llm["nom"]
+        # Fallback regex
+        name = _extract_name(message)
+        if name:
+            return name
+        cleaned = re.sub(r'(?:coefficient|coeff?|coef)[^0-9]{0,20}\d+(?:[.,]\d+)?', '', message, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\b(?:\d+ème?|première?|deuxième?|troisième?|quatrième?|cinquième?)\s+ann[ée]e?\b', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\b(?:je|la|le|les|un|une|des|du|c\'est|est|sera|pour|avec|et|il|de|nom|matière|cours|module|ajouter|créer|veux|nouvelle?|nouveau|appel[lé]e?)\b', ' ', cleaned, flags=re.IGNORECASE)
+        cleaned = ' '.join(cleaned.split()).strip()
+        return cleaned.title() if cleaned else val.capitalize()
+    return val.capitalize() if field == "prenom" else val
 
 
 def _next_question(action: str, params: dict) -> tuple:
@@ -255,11 +390,19 @@ def _complete_professor(params: dict) -> dict:
 
 
 def _complete_matiere(params: dict) -> dict:
+    final = {
+        **params,
+        "annee_scolaire": params.get("annee_scolaire", "1ère année"),
+        "coefficient":    params.get("coefficient", 1.0),
+    }
     return {
         "type":   "action",
         "action": "create_matiere",
-        "params": params,
-        "reply":  f"Je vais créer la matière '{params['nom']}' pour la classe {params.get('classe', 'A')} (coefficient {params.get('coefficient', 1.0)}). Confirmez-vous ?"
+        "params": final,
+        "reply":  (
+            f"Je vais créer la matière '{final['nom']}' — "
+            f"{final['annee_scolaire']}, coefficient {final['coefficient']}. Confirmez-vous ?"
+        ),
     }
 
 
@@ -277,7 +420,14 @@ def parse_command(message: str, db: Session, pending: dict = None) -> dict:
         existing = dict(pending.get("params", {}))
 
         if action in ("create_professor", "create_matiere"):
+            # Extraire le champ demandé
             existing[field] = parse_field_value(field, message)
+            # Essayer aussi d'extraire les autres champs manquants depuis la même réponse
+            if action == "create_matiere":
+                extra = extract_matiere_params(message)
+                for f, v in extra.items():
+                    if f not in existing:
+                        existing[f] = v
             next_f, question = _next_question(action, existing)
             if next_f:
                 return _incomplete(action, existing, next_f, question)
