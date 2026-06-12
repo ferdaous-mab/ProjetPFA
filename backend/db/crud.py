@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from db.models import (
     Student, StudentFace, StudentFaceTemp, StudentImage,
     User, Matiere, EmploiTemps, Session as SessionModel,
@@ -438,6 +439,144 @@ def get_students_at_risk(db: Session, absence_threshold: int = 3,
                 "raisons":        reasons,
             })
     return at_risk
+
+
+# ─── RECONNAISSANCE FACIALE CLASSE ───────────────────────────────────────────
+
+def find_student_by_embedding(
+    db: Session,
+    embedding,
+    threshold: float = 0.75,
+    margin: float = 0.12,
+) -> dict | None:
+    """
+    Cherche l'étudiant dont l'embedding stocké est le plus proche du vecteur
+    donné, via la distance cosinus pgvector (<=>).
+
+    Stratégie :
+      1. Regrouper par étudiant : prendre le MEILLEUR embedding de chaque personne
+         (important quand plusieurs angles sont stockés par étudiant).
+      2. Seuil absolu : similarity >= threshold.
+      3. Ratio test inter-personnes : l'écart entre le 1er et le 2ème candidat
+         doit être >= margin. Évite les confusions entre membres d'une même famille
+         (mère, sœur) qui peuvent avoir des similarités proches.
+
+    Returns dict {student_id, nom, prenom, similarity} ou None.
+    """
+    emb = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+    emb_str = "[" + ",".join(str(float(v)) for v in emb) + "]"
+
+    rows = db.execute(
+        text("""
+            SELECT student_id, nom, prenom, MAX(similarity) AS similarity
+            FROM (
+                SELECT sf.student_id::text AS student_id,
+                       s.nom,
+                       s.prenom,
+                       1 - (sf.embedding <=> CAST(:emb AS vector)) AS similarity
+                FROM   student_faces sf
+                JOIN   students s ON sf.student_id = s.id
+            ) sub
+            GROUP BY student_id, nom, prenom
+            ORDER BY similarity DESC
+            LIMIT  2
+        """),
+        {"emb": emb_str},
+    ).fetchall()
+
+    if not rows:
+        print("[MATCH] décision finale: inconnu (base vide)")
+        return None
+
+    best = rows[0]
+    best_sim = float(best.similarity)
+
+    for r in rows:
+        print(f"[MATCH] candidat: {r.prenom} {r.nom}  sim={float(r.similarity):.4f}  seuil={threshold}  marge={margin}")
+
+    if best_sim < threshold:
+        print(f"[MATCH] décision finale: rejeté seuil (sim={best_sim:.4f} < {threshold})")
+        return None
+
+    if len(rows) == 2:
+        second_sim = float(rows[1].similarity)
+        gap = best_sim - second_sim
+        if gap < margin:
+            print(f"[MATCH] décision finale: rejeté marge (gap={gap:.4f} < {margin})")
+            return None
+
+    print(f"[MATCH] décision finale: accepté {best.prenom} {best.nom}  sim={best_sim:.4f}")
+    return {
+        "student_id": best.student_id,
+        "nom":        best.nom,
+        "prenom":     best.prenom,
+        "similarity": best_sim,
+    }
+
+
+def get_session_roster(db: Session, session_id) -> list[Student]:
+    """
+    Retourne tous les étudiants inscrits (is_enrolled=True) appartenant
+    à la classe de la séance — c'est le roster attendu pour les présences.
+    Filtre aussi sur annee_scolaire si la matière la renseigne.
+    """
+    session = get_session_by_id(db, session_id)
+    if not session:
+        return []
+
+    matiere = get_matiere_by_id(db, session.matiere_id) if session.matiere_id else None
+    query = db.query(Student).filter(
+        Student.classe      == session.classe,
+        Student.is_enrolled == True,
+    )
+    if matiere and matiere.annee_scolaire:
+        query = query.filter(Student.annee_scolaire == matiere.annee_scolaire)
+
+    return query.all()
+
+
+def mark_attendance(
+    db: Session,
+    session_id,
+    student_id,
+    statut: str,
+    confidence: float = None,
+) -> Attendance:
+    """
+    UPSERT : insère une présence ou met à jour le statut si elle existe déjà.
+    Repose sur la contrainte UNIQUE(session_id, student_id).
+    """
+    now = datetime.now(timezone.utc)
+    vals: dict = {
+        "id":          uuid.uuid4(),
+        "student_id":  student_id,
+        "session_id":  session_id,
+        "status":      statut,
+        "detected_at": now,
+        "created_at":  now,
+    }
+    if confidence is not None:
+        vals["confidence"] = confidence
+
+    update_set = {"status": statut, "detected_at": now}
+    if confidence is not None:
+        update_set["confidence"] = confidence
+
+    stmt = (
+        pg_insert(Attendance)
+        .values(**vals)
+        .on_conflict_do_update(
+            index_elements=["session_id", "student_id"],
+            set_=update_set,
+        )
+    )
+    db.execute(stmt)
+    db.commit()
+
+    return db.query(Attendance).filter(
+        Attendance.session_id == session_id,
+        Attendance.student_id == student_id,
+    ).first()
 
 
 # ─── ALIAS DE COMPATIBILITÉ ──────────────────────────────────────────────────

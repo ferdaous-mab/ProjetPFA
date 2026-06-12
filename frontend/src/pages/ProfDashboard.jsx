@@ -59,6 +59,13 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
   const [pwMsg,     setPwMsg]     = useState("");
   const [pwLoading, setPwLoading] = useState(false);
 
+  // Onglet Présences
+  const [sessions,         setSessions]         = useState([]);
+  const [selectedSession,  setSelectedSession]  = useState(null);
+  const [sessionDetail,    setSessionDetail]    = useState(null);
+  const [presLoading,      setPresLoading]      = useState(false);
+  const [toggleLoading,    setToggleLoading]    = useState({});
+
   const PROF_SUGGESTIONS = [
     "Taux de présence ?",
     "Mes matières ?",
@@ -73,6 +80,14 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
     axios.get(`${API_URL}/api/messaging/unread-count`, authHeaders())
       .then(r => setUnreadMsg(r.data.count)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "presences") {
+      loadSessions();
+      setSelectedSession(null);
+      setSessionDetail(null);
+    }
+  }, [activeTab]);
 
   const loadAll = async () => {
     setLoading(true);
@@ -118,12 +133,63 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
     }
   };
 
+  const loadSessions = async () => {
+    setPresLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/api/attendance/mes-sessions`, authHeaders());
+      setSessions(res.data);
+    } catch (e) {
+      console.error("Erreur chargement séances:", e);
+    } finally {
+      setPresLoading(false);
+    }
+  };
+
+  const loadSessionDetail = async (sessionId) => {
+    setSessionDetail(null);
+    try {
+      const res = await axios.get(`${API_URL}/api/attendance/session/${sessionId}`, authHeaders());
+      setSessionDetail(res.data);
+    } catch (e) {
+      console.error("Erreur chargement détail séance:", e);
+    }
+  };
+
+  const toggleAttendance = async (sessionId, studentId, currentStatus) => {
+    const newStatus = currentStatus === "present" ? "absent" : "present";
+    const key = `${sessionId}_${studentId}`;
+    setToggleLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      await axios.put(
+        `${API_URL}/api/attendance/session/${sessionId}/student/${studentId}`,
+        { status: newStatus },
+        authHeaders()
+      );
+      await loadSessionDetail(sessionId);
+      // Rafraîchir aussi le compteur de la liste
+      setSessions(prev => prev.map(s =>
+        s.session_id === sessionId
+          ? {
+              ...s,
+              presents: newStatus === "present" ? s.presents + 1 : s.presents - 1,
+              absents:  newStatus === "absent"  ? s.absents  + 1 : s.absents  - 1,
+            }
+          : s
+      ));
+    } catch (e) {
+      console.error("Erreur toggle présence:", e);
+    } finally {
+      setToggleLoading(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
   const tabs = [
-    { id: "overview",  label: "Mes matières",      icon: "📚" },
-    { id: "today",     label: "Aujourd'hui",        icon: "📅" },
-    { id: "absents",   label: "Absences",           icon: "🔴" },
-    { id: "alertes",   label: "Alertes",            icon: "🔔" },
-    { id: "profil",    label: "Mon profil",         icon: "👤" },
+    { id: "overview",   label: "Mes matières",  icon: "📚" },
+    { id: "today",      label: "Aujourd'hui",   icon: "📅" },
+    { id: "absents",    label: "Absences",      icon: "🔴" },
+    { id: "presences",  label: "Présences",     icon: "✅" },
+    { id: "alertes",    label: "Alertes",       icon: "🔔" },
+    { id: "profil",     label: "Mon profil",    icon: "👤" },
   ];
 
   const severityColor = s =>
@@ -380,6 +446,135 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
               ))
             }
           </Card>
+        )}
+
+        {/* Présences */}
+        {activeTab === "presences" && (
+          <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {presLoading && (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+                <div className="sc-spinner sc-spinner-cyan" />
+              </div>
+            )}
+
+            {/* Liste des séances (panneau gauche) quand pas de séance sélectionnée */}
+            {!presLoading && !selectedSession && (
+              <Card>
+                <SectionTitle title="Séances — présences calculées par IA" icon="✅" />
+                {sessions.length === 0
+                  ? <EmptyState message="Aucune séance enregistrée" />
+                  : sessions.map((s, i) => (
+                    <div
+                      key={i}
+                      onClick={() => { setSelectedSession(s); loadSessionDetail(s.session_id); }}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "13px 16px", marginBottom: 8, cursor: "pointer",
+                        background: "rgba(14,165,233,0.05)",
+                        border: "1px solid rgba(14,165,233,0.12)",
+                        borderRadius: 12, transition: "background 0.15s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(14,165,233,0.11)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "rgba(14,165,233,0.05)"}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{s.matiere_nom}</div>
+                        <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <span>Classe {s.classe}</span>
+                          <span>· {new Date(s.date).toLocaleDateString("fr-FR")}</span>
+                          {s.heure_debut && <span>· {s.heure_debut.slice(0,5)}</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        {s.total > 0 ? (
+                          <>
+                            <span style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+                              {s.presents} ✓
+                            </span>
+                            <span style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+                              {s.absents} ✗
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 12 }}>Non analysée</span>
+                        )}
+                        <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 16 }}>›</span>
+                      </div>
+                    </div>
+                  ))
+                }
+              </Card>
+            )}
+
+            {/* Détail d'une séance sélectionnée */}
+            {!presLoading && selectedSession && (
+              <Card>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+                  <button
+                    onClick={() => { setSelectedSession(null); setSessionDetail(null); }}
+                    style={{
+                      background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 8, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+                      padding: "5px 12px", fontFamily: "Sora, sans-serif", fontSize: 12,
+                    }}>
+                    ← Retour
+                  </button>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{selectedSession.matiere_nom}</div>
+                    <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12 }}>
+                      Classe {selectedSession.classe} · {new Date(selectedSession.date).toLocaleDateString("fr-FR")}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 14, fontStyle: "italic" }}>
+                  Cliquez sur le badge pour basculer présent ↔ absent (correction manuelle)
+                </div>
+
+                {!sessionDetail
+                  ? <div style={{ display: "flex", justifyContent: "center", padding: 30 }}><div className="sc-spinner sc-spinner-cyan" /></div>
+                  : sessionDetail.students.length === 0
+                    ? <EmptyState message="Aucun étudiant dans ce groupe" />
+                    : sessionDetail.students.map((stu, i) => {
+                        const key = `${selectedSession.session_id}_${stu.student_id}`;
+                        const busy = !!toggleLoading[key];
+                        const isPresent = stu.status === "present";
+                        return (
+                          <div key={i} style={{
+                            display: "flex", alignItems: "center", justifyContent: "space-between",
+                            padding: "11px 0",
+                            borderBottom: i < sessionDetail.students.length - 1
+                              ? "1px solid rgba(255,255,255,0.05)" : "none",
+                          }}>
+                            <div>
+                              <div style={{ fontWeight: 500, fontSize: 14 }}>{stu.prenom} {stu.nom}</div>
+                              {stu.confidence != null && (
+                                <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, marginTop: 2 }}>
+                                  confiance {Math.round(stu.confidence * 100)}%
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              disabled={busy}
+                              onClick={() => toggleAttendance(selectedSession.session_id, stu.student_id, stu.status)}
+                              style={{
+                                background: isPresent ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                                color:      isPresent ? "#22c55e" : "#ef4444",
+                                border:    `1px solid ${isPresent ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`,
+                                borderRadius: 20, padding: "4px 14px",
+                                fontSize: 12, fontWeight: 700, cursor: busy ? "wait" : "pointer",
+                                fontFamily: "Sora, sans-serif", opacity: busy ? 0.5 : 1,
+                                transition: "all 0.15s",
+                              }}>
+                              {busy ? "…" : isPresent ? "✓ Présent" : "✗ Absent"}
+                            </button>
+                          </div>
+                        );
+                      })
+                }
+              </Card>
+            )}
+          </div>
         )}
 
         {/* Alertes */}

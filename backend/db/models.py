@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, String, Boolean, Float, Integer,
-    ForeignKey, DateTime, Date, Time, Text, CheckConstraint
+    ForeignKey, DateTime, Date, Time, Text, CheckConstraint, UniqueConstraint
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import UUID
@@ -192,6 +192,10 @@ class Attendance(Base):
     detected_at = Column(DateTime(timezone=True), nullable=True)
     confidence  = Column(Float, nullable=True)
     created_at  = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "student_id", name="uq_attendance_session_student"),
+    )
 
     student = relationship("Student", back_populates="attendances")
     session = relationship("Session", back_populates="attendances")

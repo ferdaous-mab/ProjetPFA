@@ -378,14 +378,21 @@ def capture_frame(req: CaptureRequest):
     fw, fh = x2 - x1, y2 - y1
     pad_x = max(int(fw * 0.50), 30)
     pad_y = max(int(fh * 0.50), 30)
+    crop_x0 = max(0, x1 - pad_x)
+    crop_y0 = max(0, y1 - pad_y)
     enc_crop = frame[
-        max(0, y1 - pad_y) : min(h_img, y2 + pad_y),
-        max(0, x1 - pad_x) : min(w_img, x2 + pad_x),
+        crop_y0 : min(h_img, y2 + pad_y),
+        crop_x0 : min(w_img, x2 + pad_x),
     ].copy()
+
+    # Keypoints traduits dans les coordonnées du crop (pour norm_crop lors du finalize)
+    kps_in_crop = None
+    if kps is not None:
+        kps_in_crop = [[float(p[0]) - crop_x0, float(p[1]) - crop_y0] for p in kps]
 
     # Stockage par angle - garde les BEST_PER_ANGLE meilleures
     angle_frames = session["frames_by_angle"].setdefault(angle_id, [])
-    angle_frames.append({"crop": enc_crop, "score": score})
+    angle_frames.append({"crop": enc_crop, "score": score, "kps": kps_in_crop})
     angle_frames.sort(key=lambda x: x["score"], reverse=True)
     session["frames_by_angle"][angle_id] = angle_frames[:BEST_PER_ANGLE]
 
@@ -428,30 +435,37 @@ def finalize_enrollment(req: FinalizeRequest, db: Session = Depends(get_db)):
             "Recommencez avec une meilleure lumiere."
         )
 
-    encoder    = get_encoder()
-    embeddings = []    # un embedding par angle (de la meilleure image)
-    weights    = []    # score qualite de la meilleure image
+    # Pipeline unifié : même get_face_app().get() → .normed_embedding que la reconnaissance
+    from ai.detector import get_face_app
+    face_app   = get_face_app()
+
+    embeddings = []
+    weights    = []
     student_id = session["student_id"]
 
     # ── Etape 1 : encoder la MEILLEURE image de chaque angle ─────────────────
-    # frames_by_angle[angle] est trie desc par score → frames[0] = meilleure
     for angle_id, frames in frames_by_angle.items():
         if not frames:
             continue
-        best = frames[0]          # meilleure qualite
+        best = frames[0]
         try:
-            emb = encoder.encode(best["crop"])
+            crop_rgb = cv2.cvtColor(best["crop"], cv2.COLOR_BGR2RGB)
+            detected = face_app.get(crop_rgb)
+            if not detected:
+                print(f"[ENROLL] ⚠️ angle={angle_id} aucun visage dans le crop — ignoré")
+                continue
+            face  = max(detected, key=lambda f: f.det_score)
+            emb   = face.normed_embedding.astype(np.float32)
+            print(f"[ENROLL] ✅ angle={angle_id} normed_embedding OK  score={best['score']:.3f}  det={face.det_score:.3f}")
             embeddings.append(emb)
             weights.append(best["score"])
-            logger.info(f"[embed] angle={angle_id} best_score={best['score']:.3f}")
         except Exception as e:
             logger.warning(f"[embed] echec angle={angle_id}: {e}")
+            print(f"[ENROLL] ❌ angle={angle_id} erreur: {e}")
 
     if len(embeddings) < MIN_FRAMES_TO_ENCODE:
         raise HTTPException(400, "Trop peu de frames encodees. Verifiez l'eclairage.")
 
-    # Embedding final = moyenne ponderee des embeddings des meilleures images
-    final_emb = encoder.weighted_average(embeddings, weights=weights)
     coherence = _coherence_score(embeddings)
 
     if coherence >= CONFIDENCE_GOOD:
@@ -464,16 +478,20 @@ def finalize_enrollment(req: FinalizeRequest, db: Session = Depends(get_db)):
         confidence_label = "faible"
         warning = f"Qualite faible (coherence={coherence:.2f}). Re-enrolement recommande."
 
-    # ── Etape 2 : sauvegarde embedding en base ────────────────────────────────
+    # ── Etape 2 : sauvegarde UN embedding PAR ANGLE (pas de moyenne) ─────────
+    # Stocker chaque angle séparément permet au moteur de reconnaissance
+    # de choisir le meilleur match selon l'orientation actuelle du visage,
+    # et réduit fortement les faux positifs entre membres d'une même famille.
     crud.delete_student_face(db, student_id)
-    crud.delete_student_images_db(db, student_id)   # nettoyer anciens enrolements
-    crud.create_student_face(
-        db,
-        student_id  = student_id,
-        embedding   = final_emb.tolist(),
-        det_score   = float(coherence),
-        nb_images   = sum(len(f) for f in frames_by_angle.values()),
-    )
+    crud.delete_student_images_db(db, student_id)
+    for emb, w in zip(embeddings, weights):
+        crud.create_student_face(
+            db,
+            student_id = student_id,
+            embedding  = emb.tolist() if hasattr(emb, "tolist") else list(emb),
+            det_score  = float(w),
+            nb_images  = 1,
+        )
 
     student = crud.get_student_by_id(db, student_id)
     if student:

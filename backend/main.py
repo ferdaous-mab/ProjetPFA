@@ -1,4 +1,8 @@
 import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -12,6 +16,7 @@ from routes.student     import router as student_router
 from routes.gestion     import router as gestion_router
 from routes.voice       import router as voice_router
 from routes.messaging   import router as messaging_router
+from routes.attendance  import router as attendance_router
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +30,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins     = [
         FRONTEND_URL,
+        "http://192.168.1.67:5173",
         "https://10.10.1.79:5173",
         "https://localhost:5173",
         "http://localhost:5173",
@@ -43,17 +49,24 @@ app.include_router(student_router,     prefix="/api")
 app.include_router(gestion_router,     prefix="/api")
 app.include_router(voice_router,       prefix="/api")
 app.include_router(messaging_router,   prefix="/api")
+app.include_router(attendance_router,  prefix="/api")
 
 
 def _preload_ai_models():
     """Charge les modèles InsightFace une fois au démarrage pour éviter
     le délai de 30-60 s sur la première requête /capture."""
     from routes.enrollment import get_detector, get_encoder
+    from ai.spoofing import get_anti_spoofing
     logger.info("Chargement des modeles IA (InsightFace buffalo_l)...")
     get_detector()
     logger.info("Detecteur pret.")
     get_encoder()
     logger.info("Encodeur pret. Modeles IA charges.")
+    spoof = get_anti_spoofing()
+    if spoof._available:
+        logger.info("Anti-spoofing MiniFASNetV2 pret.")
+    else:
+        logger.warning("Anti-spoofing non disponible — passthrough actif.")
 
 
 @app.on_event("startup")

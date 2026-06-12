@@ -92,11 +92,47 @@ class FaceEncoder:
             raise ValueError("Embedding degenere (norme nulle).")
         return (emb / norm).astype(np.float32)
 
+    def encode_from_kps(self, crop_bgr: np.ndarray, kps) -> np.ndarray:
+        """
+        Encode en utilisant les keypoints SCRFD déjà détectés.
+        Applique norm_crop → 112×112 aligné → ArcFace direct,
+        exactement comme FaceAnalysis.get() le fait en interne.
+        Garantit la cohérence parfaite avec la reconnaissance en classe.
+        """
+        from insightface.utils.face_align import norm_crop
+        from ai.detector import get_face_app
+
+        kps_arr   = np.array(kps, dtype=np.float32)
+        img_rgb   = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+
+        # Alignement canonique 112×112 (même opération qu'en reconnaissance)
+        aligned_rgb = norm_crop(img_rgb, landmark=kps_arr, image_size=112)
+
+        # Récupérer le modèle ArcFace depuis le singleton de reconnaissance
+        app = get_face_app()
+        rec_model = app.models.get("recognition")
+        if rec_model is None:
+            for model in app.models.values():
+                if hasattr(model, "get_feat"):
+                    rec_model = model
+                    break
+        if rec_model is None:
+            raise ValueError("Modèle ArcFace introuvable dans get_face_app()")
+
+        emb = rec_model.get_feat([aligned_rgb])[0].astype(np.float32)
+        norm = np.linalg.norm(emb)
+        if norm < 1e-10:
+            raise ValueError("Embedding dégénéré (norme nulle).")
+        return (emb / norm).astype(np.float32)
+
     def _try_encode(self, face_bgr: np.ndarray):
-        """Tente l'encodage, retourne None si echec."""
+        """Tente l'encodage via re-détection (fallback sans keypoints)."""
         try:
+            # Utilise le même singleton que la reconnaissance pour la cohérence
+            from ai.detector import get_face_app
+            app = get_face_app()
             img_rgb = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
-            faces   = self.app.get(img_rgb)
+            faces   = app.get(img_rgb)
             if faces:
                 best = max(faces, key=lambda f: f.det_score)
                 return best.embedding.astype(np.float32)

@@ -49,8 +49,6 @@ def init_db():
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         # Migration : ON DELETE SET NULL → CASCADE sur users.student_id
-        # N'affecte pas les données existantes, seulement les futures suppressions.
-        # Idempotent : peut être relancé sans risque.
         try:
             conn.execute(text(
                 "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_student_id_fkey"
@@ -62,5 +60,32 @@ def init_db():
         except Exception:
             conn.rollback()
         conn.commit()
+
+        # Migration : UNIQUE(session_id, student_id) sur attendances
+        try:
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'uq_attendance_session_student'
+                    ) THEN
+                        -- Dédoublonner : garder la ligne la plus récente par paire
+                        DELETE FROM attendances a
+                        USING attendances b
+                        WHERE a.id < b.id
+                          AND a.session_id = b.session_id
+                          AND a.student_id = b.student_id;
+
+                        ALTER TABLE attendances
+                            ADD CONSTRAINT uq_attendance_session_student
+                            UNIQUE (session_id, student_id);
+                    END IF;
+                END $$;
+            """))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
     Base.metadata.create_all(bind=engine)
     print("DB initialisée ✅")
