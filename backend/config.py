@@ -70,7 +70,6 @@ def init_db():
                         SELECT 1 FROM pg_constraint
                         WHERE conname = 'uq_attendance_session_student'
                     ) THEN
-                        -- Dédoublonner : garder la ligne la plus récente par paire
                         DELETE FROM attendances a
                         USING attendances b
                         WHERE a.id < b.id
@@ -80,6 +79,30 @@ def init_db():
                         ALTER TABLE attendances
                             ADD CONSTRAINT uq_attendance_session_student
                             UNIQUE (session_id, student_id);
+                    END IF;
+                END $$;
+            """))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # Migration : nouvelles colonnes messagerie (is_deleted, reply_to_id)
+        try:
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'messages' AND column_name = 'is_deleted'
+                    ) THEN
+                        ALTER TABLE messages ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'messages' AND column_name = 'reply_to_id'
+                    ) THEN
+                        ALTER TABLE messages ADD COLUMN reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL;
                     END IF;
                 END $$;
             """))

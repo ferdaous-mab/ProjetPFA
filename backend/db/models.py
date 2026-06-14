@@ -257,6 +257,8 @@ class Message(Base):
     receiver_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     content     = Column(Text, nullable=False)
     is_read     = Column(Boolean, default=False)
+    is_deleted  = Column(Boolean, default=False)
+    reply_to_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
     created_at  = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     sender   = relationship("User", foreign_keys=[sender_id])

@@ -17,25 +17,73 @@ const DEFAULT_SUGGESTIONS = [
 ];
 
 const ACTION_LABELS = {
-  create_professor:    { title: "Création de compte professeur", icon: "👨‍🏫", warning: false },
-  create_matiere:      { title: "Création d'une matière",         icon: "📚",  warning: false },
-  deactivate_professor:{ title: "Désactivation d'un compte",      icon: "🔒",  warning: true  },
+  create_professor:     { title: "Création de compte professeur",   icon: "👨‍🏫", warning: false },
+  create_matiere:       { title: "Création d'une matière",           icon: "📚",  warning: false },
+  create_note:          { title: "Ajout d'une note",                 icon: "📝",  warning: false },
+  create_alert:         { title: "Envoi d'une alerte",               icon: "🔔",  warning: false },
+  create_schedule:      { title: "Ajout d'un créneau horaire",       icon: "📅",  warning: false },
+  deactivate_professor: { title: "Désactivation d'un professeur",    icon: "🔒",  warning: true  },
+  reactivate_professor: { title: "Réactivation d'un professeur",     icon: "🔓",  warning: false },
+  deactivate_student:   { title: "Désactivation d'un étudiant",      icon: "🔒",  warning: true  },
+  reactivate_student:   { title: "Réactivation d'un étudiant",       icon: "🔓",  warning: false },
+  reset_password_prof:  { title: "Réinitialisation du mot de passe", icon: "🔑",  warning: false },
+  delete_matiere:       { title: "Suppression d'une matière",        icon: "🗑️",  warning: true  },
 };
 
 const ACTION_REQUIRED = {
-  create_professor: ["prenom", "nom", "email"],
-  create_matiere:   ["nom", "annee_scolaire", "coefficient"],
+  create_professor:     ["prenom", "nom", "email"],
+  create_matiere:       ["nom", "annee_scolaire", "coefficient"],
+  create_note:          ["student_name", "matiere_name", "note"],
+  create_alert:         ["message", "annee_scolaire"],
+  create_schedule:      ["matiere_name", "classe", "jour", "heure_debut", "heure_fin"],
+  deactivate_professor: ["prof_name"],
+  reactivate_professor: ["prof_name"],
+  deactivate_student:   ["student_name"],
+  reactivate_student:   ["student_name"],
+  reset_password_prof:  ["prof_name"],
+  delete_matiere:       ["matiere_name"],
 };
 
 const PARAM_LABELS = {
   nom: "Nom", prenom: "Prénom", email: "Email",
   annee_scolaire: "Niveau", coefficient: "Coefficient",
+  student_name: "Étudiant", matiere_name: "Matière", note: "Note",
+  message: "Message", classe: "Groupe",
+  jour: "Jour", heure_debut: "Début", heure_fin: "Fin",
+  prof_name: "Professeur", student_display: "Étudiant",
+  matiere_display: "Matière", display_name: "Nom",
 };
 
+// Champs modifiables par action (les références DB comme prof_id/student_id ne sont pas éditables)
+const EDITABLE_FIELDS_MAP = {
+  create_professor:     ["prenom", "nom", "email"],
+  create_matiere:       ["nom", "annee_scolaire", "coefficient"],
+  create_note:          ["note"],
+  create_alert:         ["message", "annee_scolaire"],
+  create_schedule:      ["classe", "jour", "heure_debut", "heure_fin"],
+  deactivate_professor: [],
+  reactivate_professor: [],
+  deactivate_student:   [],
+  reactivate_student:   [],
+  reset_password_prof:  [],
+  delete_matiere:       [],
+};
+
+const NIVEAUX = ["1ère année", "2ème année", "3ème année", "4ème année", "5ème année"];
+const JOURS   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+
 const INCOMPLETE_HINTS = {
-  create_professor:    "Création de compte professeur en cours...",
-  create_matiere:      "Création de matière en cours...",
-  deactivate_professor:"Désactivation en cours...",
+  create_professor:     "Création de compte professeur en cours...",
+  create_matiere:       "Création de matière en cours...",
+  create_note:          "Ajout de note en cours...",
+  create_alert:         "Création d'alerte en cours...",
+  create_schedule:      "Ajout de créneau en cours...",
+  deactivate_professor: "Désactivation professeur en cours...",
+  reactivate_professor: "Réactivation professeur en cours...",
+  deactivate_student:   "Désactivation étudiant en cours...",
+  reactivate_student:   "Réactivation étudiant en cours...",
+  reset_password_prof:  "Réinitialisation mot de passe en cours...",
+  delete_matiere:       "Suppression de matière en cours...",
 };
 
 
@@ -52,6 +100,7 @@ export default function VoiceAssistant({
   const [inputText,         setInputText]         = useState("");
   const [error,             setError]             = useState("");
   const [pendingIncomplete, setPendingIncomplete] = useState(null);
+  const [editingCards,      setEditingCards]      = useState({});
   const [liveTranscript,    setLiveTranscript]    = useState("");
   const [isSpeaking,        setIsSpeaking]        = useState(false);
 
@@ -326,29 +375,82 @@ export default function VoiceAssistant({
     setMessages(prev => prev.map(m => m.id === actionId ? { ...m, status: "processing" } : m));
     try {
       let res;
+      const h = { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" };
+      const hNoBody = { Authorization: `Bearer ${getToken()}` };
+
       if (action === "create_professor") {
-        res = await axios.post(`${API_URL}/api/gestion/professeurs`, params, {
-          headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" }
-        });
+        res = await axios.post(`${API_URL}/api/gestion/professeurs`, params, { headers: h });
         const tempPwd = res?.data?.temp_password;
         const baseMsg = res?.data?.message || `Compte créé pour ${params.prenom} ${params.nom}`;
-        const fullMsg = tempPwd
-          ? `${baseMsg}. Mot de passe temporaire : ${tempPwd}`
-          : baseMsg;
+        const fullMsg = tempPwd ? `${baseMsg}. Mot de passe temporaire : ${tempPwd}` : baseMsg;
         setMessages(prev => prev.map(m => m.id === actionId ? { ...m, status: "confirmed", tempPassword: tempPwd } : m));
         addMessage("assistant", "✅ " + fullMsg);
         speakText(baseMsg + (tempPwd ? `. Le mot de passe temporaire est : ${tempPwd}` : ""));
         scrollToBottom();
         return;
+
       } else if (action === "create_matiere") {
-        res = await axios.post(`${API_URL}/api/gestion/matieres`, params, {
-          headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" }
-        });
+        res = await axios.post(`${API_URL}/api/gestion/matieres`, params, { headers: h });
+
+      } else if (action === "create_note") {
+        res = await axios.post(`${API_URL}/api/gestion/notes`, {
+          student_id: params.student_id,
+          matiere_id: params.matiere_id,
+          note: params.note,
+          type: "controle",
+        }, { headers: h });
+
+      } else if (action === "create_alert") {
+        const niveau = params.annee_scolaire;
+        const isTous = !niveau || niveau === "tous";
+        const years = ["1ère année","2ème année","3ème année","4ème année","5ème année"];
+        const targets = isTous ? years : [niveau];
+        for (const y of targets) {
+          await axios.post(`${API_URL}/api/gestion/alertes`, {
+            message: params.message,
+            type: "information",
+            severity: "medium",
+            classe: y,
+            target_role: "etudiant",
+          }, { headers: h });
+        }
+        res = { data: { message: `Alerte envoyée à ${isTous ? "tous les étudiants" : niveau}` } };
+
+      } else if (action === "create_schedule") {
+        res = await axios.post(`${API_URL}/api/gestion/emplois`, {
+          matiere_id:  params.matiere_id,
+          classe:      params.classe,
+          jour:        params.jour,
+          heure_debut: params.heure_debut,
+          heure_fin:   params.heure_fin,
+        }, { headers: h });
+
       } else if (action === "deactivate_professor") {
-        res = await axios.delete(`${API_URL}/api/gestion/professeurs/${params.prof_id}`, {
-          headers: { Authorization: `Bearer ${getToken()}` }
-        });
+        res = await axios.delete(`${API_URL}/api/gestion/professeurs/${params.prof_id}`, { headers: hNoBody });
+
+      } else if (action === "reactivate_professor") {
+        res = await axios.put(`${API_URL}/api/gestion/professeurs/${params.prof_id}/reactivate`, {}, { headers: h });
+
+      } else if (action === "deactivate_student") {
+        res = await axios.put(`${API_URL}/api/gestion/etudiants/${params.student_id}/deactivate`, {}, { headers: h });
+
+      } else if (action === "reactivate_student") {
+        res = await axios.put(`${API_URL}/api/gestion/etudiants/${params.student_id}/reactivate`, {}, { headers: h });
+
+      } else if (action === "reset_password_prof") {
+        res = await axios.post(`${API_URL}/api/gestion/professeurs/${params.prof_id}/reset-password`, {}, { headers: h });
+        const newPwd = res?.data?.password;
+        const baseMsg = `Mot de passe réinitialisé pour ${params.display_name}`;
+        setMessages(prev => prev.map(m => m.id === actionId ? { ...m, status: "confirmed", tempPassword: newPwd } : m));
+        addMessage("assistant", "✅ " + baseMsg + (newPwd ? `. Nouveau mot de passe : ${newPwd}` : ""));
+        speakText(baseMsg + (newPwd ? `. Le nouveau mot de passe est : ${newPwd}` : ""));
+        scrollToBottom();
+        return;
+
+      } else if (action === "delete_matiere") {
+        res = await axios.delete(`${API_URL}/api/gestion/matieres/${params.matiere_id}`, { headers: hNoBody });
       }
+
       const msg = res?.data?.message || "Action effectuée avec succès.";
       setMessages(prev => prev.map(m => m.id === actionId ? { ...m, status: "confirmed" } : m));
       addMessage("assistant", "✅ " + msg);
@@ -389,6 +491,52 @@ export default function VoiceAssistant({
     return { collected, total: required.length };
   })() : null;
 
+  // ── Helper : rendu d'un champ éditable ──────────────────────────────────────
+  const renderFieldInput = (field, value, onChange) => {
+    const inputStyle = {
+      flex: 1, padding: "5px 8px",
+      background: "rgba(255,255,255,0.07)",
+      border: "1px solid rgba(99,102,241,0.4)",
+      borderRadius: 7, color: "#fff", fontSize: 12,
+      fontFamily: "Sora, sans-serif", outline: "none",
+      minWidth: 0,
+    };
+    const selectStyle = { ...inputStyle, cursor: "pointer" };
+
+    if (field === "annee_scolaire") return (
+      <select value={value || ""} onChange={e => onChange(e.target.value)} style={selectStyle}>
+        {NIVEAUX.map(n => <option key={n} value={n} style={{ background: "#0a0a1a" }}>{n}</option>)}
+      </select>
+    );
+    if (field === "jour") return (
+      <select value={value || ""} onChange={e => onChange(e.target.value)} style={selectStyle}>
+        {JOURS.map(j => <option key={j} value={j} style={{ background: "#0a0a1a" }}>{j}</option>)}
+      </select>
+    );
+    if (field === "classe") return (
+      <select value={value || "A"} onChange={e => onChange(e.target.value)} style={selectStyle}>
+        {["A","B","C","D"].map(c => <option key={c} value={c} style={{ background: "#0a0a1a" }}>{c}</option>)}
+      </select>
+    );
+    if (field === "coefficient" || field === "note") return (
+      <input type="number" value={value ?? ""} step="0.5" min="0" max={field === "note" ? 20 : undefined}
+        onChange={e => onChange(e.target.value)} style={inputStyle} />
+    );
+    if (field === "heure_debut" || field === "heure_fin") return (
+      <input type="time" value={value || ""} onChange={e => onChange(e.target.value)} style={inputStyle} />
+    );
+    if (field === "email") return (
+      <input type="email" value={value || ""} onChange={e => onChange(e.target.value)} style={inputStyle} />
+    );
+    if (field === "message") return (
+      <textarea value={value || ""} onChange={e => onChange(e.target.value)}
+        rows={2} style={{ ...inputStyle, resize: "none", lineHeight: 1.5 }} />
+    );
+    return (
+      <input type="text" value={value || ""} onChange={e => onChange(e.target.value)} style={inputStyle} />
+    );
+  };
+
   // ── Rendu de la carte d'action ───────────────────────────────────────────────
   const renderActionCard = (msg) => {
     const label       = ACTION_LABELS[msg.action] || { title: msg.action, icon: "⚡", warning: false };
@@ -398,12 +546,29 @@ export default function VoiceAssistant({
     const isCancelled = msg.status === "cancelled";
     const isError     = msg.status === "error";
 
+    const editableFields = EDITABLE_FIELDS_MAP[msg.action] || [];
+    const currentEdit    = editingCards[msg.id] || {};
+    const getVal = (k) => (k in currentEdit) ? currentEdit[k] : msg.params[k];
+    const setVal = (k, v) => setEditingCards(prev => ({
+      ...prev,
+      [msg.id]: { ...msg.params, ...(prev[msg.id] || {}), [k]: v },
+    }));
+
+    // Params finaux à envoyer (écraser l'original par les edits, convertir types)
+    const buildFinalParams = () => {
+      const merged = { ...msg.params, ...currentEdit };
+      if ("coefficient" in merged) merged.coefficient = parseFloat(merged.coefficient) || 1;
+      if ("note"        in merged) merged.note        = parseFloat(merged.note)        || 0;
+      return merged;
+    };
+
     return (
       <div style={{
         background: label.warning ? "rgba(239,68,68,0.08)" : "rgba(99,102,241,0.1)",
         border: `1px solid ${label.warning ? "rgba(239,68,68,0.3)" : "rgba(99,102,241,0.35)"}`,
         borderRadius: 14, padding: "14px 16px", fontSize: 13,
       }}>
+        {/* Titre */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, fontWeight: 700 }}>
           <span>{label.icon}</span>
           <span style={{ color: label.warning ? "#fca5a5" : "#a5b4fc" }}>{label.title}</span>
@@ -413,20 +578,43 @@ export default function VoiceAssistant({
           {isProc      && <span style={{ color: "#a5b4fc", marginLeft: "auto", fontSize: 12 }}>⏳ En cours...</span>}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {/* Champs */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {Object.entries(msg.params)
             .filter(([k]) => PARAM_LABELS[k])
-            .map(([k, v]) => (
-              <div key={k} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ color: "rgba(255,255,255,0.4)", minWidth: 100, fontSize: 11 }}>{PARAM_LABELS[k]}</span>
-                <span style={{ color: "#fff", fontWeight: 500 }}>
-                  {k === "password" ? "•".repeat(String(v).length) : String(v)}
-                </span>
-              </div>
-            ))}
+            .map(([k]) => {
+              const isEditable = isPending && editableFields.includes(k);
+              return (
+                <div key={k} style={{ display: "flex", gap: 8, alignItems: isEditable ? "flex-start" : "center" }}>
+                  <span style={{
+                    color: isEditable ? "rgba(165,180,252,0.7)" : "rgba(255,255,255,0.4)",
+                    minWidth: 100, fontSize: 11, paddingTop: isEditable ? 7 : 0,
+                    fontWeight: isEditable ? 600 : 400,
+                  }}>
+                    {PARAM_LABELS[k]}{isEditable ? " ✎" : ""}
+                  </span>
+                  {isEditable
+                    ? renderFieldInput(k, getVal(k), v => setVal(k, v))
+                    : <span style={{ color: "#fff", fontWeight: 500 }}>
+                        {String(getVal(k) ?? "")}
+                      </span>
+                  }
+                </div>
+              );
+            })}
+
+          {isPending && editableFields.length > 0 && (
+            <div style={{
+              fontSize: 10, color: "rgba(99,102,241,0.6)", marginTop: 2,
+              borderTop: "1px solid rgba(99,102,241,0.15)", paddingTop: 6,
+            }}>
+              ✎ Modifiez les champs si nécessaire avant de confirmer
+            </div>
+          )}
+
           {isConfirmed && msg.tempPassword && (
             <div style={{
-              marginTop: 10, padding: "8px 12px",
+              marginTop: 6, padding: "8px 12px",
               background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)",
               borderRadius: 8,
             }}>
@@ -448,7 +636,7 @@ export default function VoiceAssistant({
 
         {isPending && (
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            <button onClick={() => executeAction(msg.id, msg.action, msg.params)} style={{
+            <button onClick={() => executeAction(msg.id, msg.action, buildFinalParams())} style={{
               flex: 1, padding: "9px", border: "none", borderRadius: 8,
               background: label.warning
                 ? "linear-gradient(135deg,#ef4444,#dc2626)"
