@@ -1,0 +1,9 @@
+{
+  "threshold": 0.42,
+  "margin": 0.12,
+  "calibrated_on": "pictest.jpeg",
+  "known_count": 22,
+  "unknown_count": 9,
+  "tp_rate": 0.8636363636363636,
+  "fp_count": 0
+}

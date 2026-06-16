@@ -29,9 +29,10 @@ from config import SessionLocal
 from db import crud
 
 # ── Paramètres (identiques à attendance.py) ───────────────────────────────────
-MIN_FACE_PX     = 10     # accepter visages très petits
-DET_SCORE_MIN   = 0.20   # seuil très bas : capture tout ce qui ressemble à un visage
-MAX_FRAME_WIDTH = 640    # réduire avant analyse si > 640px
+MIN_FACE_PX     = 8      # visages très petits (caméra haute)
+DET_SCORE_MIN   = 0.20   # seuil bas : capture tout ce qui ressemble à un visage
+MAX_FRAME_WIDTH = 960    # compromis vitesse / détection : det_size=640 interne
+                          # 960px → SCRFD voit ~640×360 → faces ~20px détectables
 
 COLOR_KNOWN   = (34,  197,  60)   # vert  — reconnu
 COLOR_UNKNOWN = (34,   60, 230)   # rouge — inconnu / rejeté
@@ -100,12 +101,12 @@ def _enhance(frame: np.ndarray) -> np.ndarray:
 def analyze_frame(frame: np.ndarray, spoof) -> list[dict]:
     """
     Pipeline IDENTIQUE à attendance.py :
-      - get_face_app() singleton  (det_size=480×480)
-      - crud.find_student_by_embedding() (threshold=0.75, margin=0.12)
+      - get_face_app_hd() singleton  (det_size=1280×1280 — précis pour petits visages)
+      - crud.find_student_by_embedding() (threshold=0.62, margin=0.08)
     """
-    from ai.detector import get_face_app
+    from ai.detector import get_face_app_hd
 
-    app = get_face_app()
+    app = get_face_app_hd()
     h_orig, w_orig = frame.shape[:2]
 
     if w_orig > MAX_FRAME_WIDTH:
@@ -122,19 +123,27 @@ def analyze_frame(frame: np.ndarray, spoof) -> list[dict]:
     except Exception:
         return []
 
+    n_total     = len(raw)
+    n_emb_none  = 0
+    n_too_small = 0
+    n_low_score = 0
+
     results        = []
     current_bboxes = []
 
     db = SessionLocal()
     try:
         for face in raw:
-            if float(face.det_score) < DET_SCORE_MIN:
+            score = float(face.det_score)
+            if score < DET_SCORE_MIN:
+                n_low_score += 1
                 continue
 
             rx1, ry1, rx2, ry2 = [int(v) for v in face.bbox.tolist()]
             rx1 = max(0, rx1); ry1 = max(0, ry1)
             rx2 = min(w_s, rx2); ry2 = min(h_s, ry2)
             if rx2 - rx1 < MIN_FACE_PX or ry2 - ry1 < MIN_FACE_PX:
+                n_too_small += 1
                 continue
 
             x1 = max(0,      int(rx1 / sx))
@@ -148,29 +157,33 @@ def analyze_frame(frame: np.ndarray, spoof) -> list[dict]:
             if cached is not None:
                 r = dict(cached)
                 r["bbox"]      = bbox
-                r["det_score"] = round(float(face.det_score), 2)
+                r["det_score"] = round(score, 2)
                 results.append(r)
                 continue
 
             if face.normed_embedding is None:
+                n_emb_none += 1
+                print(f"[DIAG] visage {rx2-rx1}x{ry2-ry1}px det={score:.2f} -> embedding=None")
                 continue
 
             spoof_conf = 1.0
-            if USE_SPOOF and spoof and spoof._available:
+            face_w = rx2 - rx1
+            face_h = ry2 - ry1
+            spoof_eligible = face_w >= 80 and face_h >= 80
+            if USE_SPOOF and spoof and spoof._available and spoof_eligible:
                 crop = frame[y1:y2, x1:x2].copy()
                 is_real, spoof_conf = spoof.is_real(crop)
                 if not is_real:
                     r = {"bbox": bbox, "spoof": True, "recognized": False,
                          "nom": "SPOOF", "prenom": "",
                          "similarity": 0.0, "spoof_conf": spoof_conf,
-                         "det_score": round(float(face.det_score), 2)}
+                         "det_score": round(score, 2)}
                     _update_cache(bbox, r)
                     results.append(r)
                     continue
 
-            # Matching unifié — même fonction que attendance.py
             q_emb = face.normed_embedding.astype(np.float32)
-            match = crud.find_student_by_embedding(db, q_emb, threshold=0.75, margin=0.12)
+            match = crud.find_student_by_embedding(db, q_emb, threshold=0.62, margin=0.08)
 
             if match:
                 r = {
@@ -182,7 +195,7 @@ def analyze_frame(frame: np.ndarray, spoof) -> list[dict]:
                     "prenom":     match["prenom"],
                     "similarity": round(match["similarity"], 3),
                     "spoof_conf": spoof_conf,
-                    "det_score":  round(float(face.det_score), 2),
+                    "det_score":  round(score, 2),
                 }
             else:
                 r = {
@@ -194,10 +207,17 @@ def analyze_frame(frame: np.ndarray, spoof) -> list[dict]:
                     "prenom":     "",
                     "similarity": 0.0,
                     "spoof_conf": spoof_conf,
-                    "det_score":  round(float(face.det_score), 2),
+                    "det_score":  round(score, 2),
                 }
             _update_cache(bbox, r)
             results.append(r)
+
+        # Résumé diagnostique après le for loop
+        if n_total > 0:
+            print(f"[DIAG] {n_total} detect. | trop_petit={n_too_small} "
+                  f"score_bas={n_low_score} emb_none={n_emb_none} "
+                  f"traites={n_total-n_too_small-n_low_score-n_emb_none}")
+
     finally:
         db.close()
 
@@ -253,8 +273,9 @@ def run_live(source, spoof, window_title: str):
         return
 
     if isinstance(source, int):
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        # Résolution maximale pour mieux détecter les visages lointains
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
     print("[INFO] Fenêtre ouverte — 'q' pour quitter.")
 

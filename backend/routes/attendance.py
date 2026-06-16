@@ -31,9 +31,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
-SIMILARITY_THRESHOLD = 0.75   # seuil cosinus très strict — évite confusions famille (mère, sœur)
+SIMILARITY_THRESHOLD = 0.62   # caméra haute/plafond : vues top-down scorent moins fort
+                              # que le frontal (ArcFace est entraîné surtout en frontal)
+SIMILARITY_MARGIN    = 0.08   # écart minimum entre 1er et 2ème candidat
 FRAME_SAMPLE_RATE    = 30     # 1 frame analysée toutes les N frames (1/s à 30fps)
 MAX_SAMPLED_FRAMES   = 60     # limite pour éviter un timeout sur très longues vidéos
+
+# MiniFASNetV2 est entraîné sur des visages frontaux en gros plan.
+# Pour une caméra haute (plafond), les visages sont petits, flous et vus de dessus
+# → le modèle les classifie tous comme "faux" (faux positifs massifs).
+# On désactive l'anti-spoofing pour les petits visages (< ANTISPOOF_MIN_PX px).
+# Les risques de spoofing par photo brandie sont quasi nuls avec une caméra au plafond.
+ANTISPOOF_MIN_PX = 80   # en dessous de cette taille, skip l'anti-spoofing
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -83,21 +92,32 @@ def _process_frame(
 
     spoof = _get_spoof()
     recognized = []
-    faces = detect_faces_classroom(frame, min_face_size=35, min_score=0.45)
+    faces = detect_faces_classroom(frame, min_face_size=20, min_score=0.35)
     print(f"[ATTENDANCE] {len(faces)} visage(s) détecté(s)")
 
     for i, face in enumerate(faces):
-        crop_spoof = _spoof_crop(frame, face["bbox"], scale=2.7)
-        is_real, spoof_conf = spoof.is_real(crop_spoof)
-        print(f"[SPOOF #{i}] is_real={is_real}  conf={spoof_conf:.4f}  bbox={face['bbox']}")
-        if not is_real:
-            print(f"[SPOOF #{i}] ❌ Visage 2D REJETÉ")
-            continue
+        fw = face["width"]
+        fh = face["height"]
+
+        # Skip anti-spoofing pour les petits visages (caméra haute) :
+        # MiniFASNetV2 est entraîné sur des gros plans frontaux → faux positifs massifs
+        # sur des visages petits/flous vus de dessus. Le risque de spoofing est quasi nul
+        # avec une caméra au plafond (il faudrait brandir une affiche géante).
+        if fw >= ANTISPOOF_MIN_PX and fh >= ANTISPOOF_MIN_PX:
+            crop_spoof = _spoof_crop(frame, face["bbox"], scale=2.7)
+            is_real, spoof_conf = spoof.is_real(crop_spoof)
+            print(f"[SPOOF #{i}] is_real={is_real}  conf={spoof_conf:.4f}  bbox={face['bbox']}")
+            if not is_real:
+                print(f"[SPOOF #{i}] ❌ Visage 2D REJETÉ")
+                continue
+        else:
+            print(f"[SPOOF #{i}] visage {fw}×{fh}px — skip anti-spoof (trop petit pour MiniFASNet)")
 
         match = crud.find_student_by_embedding(
             db,
             face["normed_embedding"],
             threshold=SIMILARITY_THRESHOLD,
+            margin=SIMILARITY_MARGIN,
         )
         print(f"[MATCH #{i}] {match}")
         if match and match["student_id"] not in seen:
