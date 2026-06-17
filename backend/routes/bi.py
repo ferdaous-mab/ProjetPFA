@@ -12,8 +12,26 @@ from datetime import datetime, timezone, timedelta
 import anthropic
 import os
 import json as json_lib
+import time
 
 router = APIRouter()
+
+# ── Cache mémoire TTL ─────────────────────────────────────────────────────────
+_cache: dict = {}
+_CACHE_TTL         = 60   # secondes — endpoints BI classiques
+_CACHE_TTL_PREDICT = 300  # 5 min — prediction IA (appel Claude coûteux)
+
+def _cache_get(key: str, ttl: int = _CACHE_TTL):
+    entry = _cache.get(key)
+    if entry and time.time() - entry["ts"] < ttl:
+        return entry["val"]
+    return None
+
+def _cache_set(key: str, val):
+    _cache[key] = {"val": val, "ts": time.time()}
+
+def _cache_clear():
+    _cache.clear()
 
 
 def _students(db, classe=None, annee_scolaire=None):
@@ -35,9 +53,19 @@ async def get_overview(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    students = _students(db, classe, annee_scolaire)
-    ids      = [s.id for s in students]
-    enrolled = sum(1 for s in students if s.is_enrolled)
+    ck = f"overview|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck)
+    if cached:
+        return cached
+
+    # Compter directement en SQL (plus rapide que charger toutes les lignes)
+    q = db.query(Student)
+    if classe:         q = q.filter(Student.classe == classe)
+    if annee_scolaire: q = q.filter(Student.annee_scolaire == annee_scolaire)
+    total_etudiants = q.count()
+    enrolled = q.filter(Student.is_enrolled == True).count()
+
+    ids = [r[0] for r in q.with_entities(Student.id).all()] if (classe or annee_scolaire) else None
 
     sess_q = db.query(SessionModel)
     mat_q  = db.query(Matiere)
@@ -45,26 +73,26 @@ async def get_overview(
         sess_q = sess_q.filter(SessionModel.classe == classe)
         mat_q  = mat_q.filter(Matiere.classe == classe)
 
-    if ids:
-        total_att = db.query(Attendance).filter(Attendance.student_id.in_(ids)).count()
-        present   = db.query(Attendance).filter(
-            Attendance.student_id.in_(ids), Attendance.status == "present"
-        ).count()
-    else:
-        total_att = present = 0
+    att_q = db.query(Attendance)
+    if ids is not None:
+        att_q = att_q.filter(Attendance.student_id.in_(ids))
 
+    total_att = att_q.count()
+    present   = att_q.filter(Attendance.status == "present").count()
     taux_global = round((present / total_att * 100), 1) if total_att > 0 else 0
 
-    return {
-        "total_etudiants":      len(students),
+    result = {
+        "total_etudiants":      total_etudiants,
         "enrolles":             enrolled,
-        "non_enrolles":         len(students) - enrolled,
+        "non_enrolles":         total_etudiants - enrolled,
         "total_sessions":       sess_q.count(),
         "total_matieres":       mat_q.count(),
         "total_profs":          db.query(User).filter(User.role == "professeur", User.is_active == True).count(),
         "alertes_non_lues":     db.query(Alert).filter(Alert.is_read == False).count(),
         "taux_presence_global": taux_global,
     }
+    _cache_set(ck, result)
+    return result
 
 
 @router.get("/bi/presence-par-classe")
@@ -74,6 +102,10 @@ async def presence_par_classe(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
+    ck = f"pres_classe|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck)
+    if cached: return cached
+
     if classe:
         classes_to_query = [classe]
     else:
@@ -84,26 +116,20 @@ async def presence_par_classe(
 
     result = []
     for cl in classes_to_query:
-        q = db.query(Student).filter(Student.classe == cl)
+        q = db.query(Student.id).filter(Student.classe == cl)
         if annee_scolaire:
             q = q.filter(Student.annee_scolaire == annee_scolaire)
-        students = q.all()
-        if not students:
-            continue
+        ids = [r[0] for r in q.all()]
+        if not ids: continue
 
-        ids           = [s.id for s in students]
         total_att     = db.query(Attendance).filter(Attendance.student_id.in_(ids)).count()
         total_present = db.query(Attendance).filter(
             Attendance.student_id.in_(ids), Attendance.status == "present"
         ).count()
-
         taux = round((total_present / total_att * 100), 1) if total_att > 0 else 0
-        result.append({
-            "classe":        cl,
-            "taux_presence": taux,
-            "nb_etudiants":  len(students),
-        })
+        result.append({"classe": cl, "taux_presence": taux, "nb_etudiants": len(ids)})
 
+    _cache_set(ck, result)
     return result
 
 
@@ -114,33 +140,33 @@ async def presence_par_matiere(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
+    ck = f"pres_mat|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck)
+    if cached: return cached
+
+    from sqlalchemy import case
     mat_q = db.query(Matiere)
     if classe: mat_q = mat_q.filter(Matiere.classe == classe)
     matieres = mat_q.all()
 
-    student_ids_scope = set(_student_ids(db, classe, annee_scolaire))
+    student_ids_scope = set(_student_ids(db, classe, annee_scolaire)) if (classe or annee_scolaire) else None
     result = []
 
     for m in matieres:
-        sessions     = db.query(SessionModel).filter(SessionModel.matiere_id == m.id).all()
-        total_att    = total_present = 0
-        for s in sessions:
-            att_q = db.query(Attendance).filter(Attendance.session_id == s.id)
-            if student_ids_scope:
-                att_q = att_q.filter(Attendance.student_id.in_(student_ids_scope))
-            att     = att_q.count()
-            present = att_q.filter(Attendance.status == "present").count()
-            total_att     += att
-            total_present += present
+        sess_ids = [r[0] for r in db.query(SessionModel.id).filter(SessionModel.matiere_id == m.id).all()]
+        if not sess_ids:
+            result.append({"matiere": m.nom, "code": m.code, "taux_presence": 0, "nb_sessions": 0})
+            continue
 
+        att_q = db.query(Attendance).filter(Attendance.session_id.in_(sess_ids))
+        if student_ids_scope:
+            att_q = att_q.filter(Attendance.student_id.in_(student_ids_scope))
+        total_att     = att_q.count()
+        total_present = att_q.filter(Attendance.status == "present").count()
         taux = round((total_present / total_att * 100), 1) if total_att > 0 else 0
-        result.append({
-            "matiere":       m.nom,
-            "code":          m.code,
-            "taux_presence": taux,
-            "nb_sessions":   len(sessions),
-        })
+        result.append({"matiere": m.nom, "code": m.code, "taux_presence": taux, "nb_sessions": len(sess_ids)})
 
+    _cache_set(ck, result)
     return result
 
 
@@ -151,33 +177,54 @@ async def evolution_presences(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    student_ids_scope = set(_student_ids(db, classe, annee_scolaire))
+    ck = f"evolution|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck)
+    if cached: return cached
+
+    from sqlalchemy import case as sa_case
+    student_ids_scope = set(_student_ids(db, classe, annee_scolaire)) if (classe or annee_scolaire) else None
+    today = datetime.now(timezone.utc).date()
+    since = today - timedelta(days=29)
+
+    # Une seule requête pour toutes les sessions des 30 derniers jours
+    sess_q = db.query(SessionModel).filter(SessionModel.date >= since, SessionModel.date <= today)
+    if classe: sess_q = sess_q.filter(SessionModel.classe == classe)
+    sessions = sess_q.all()
+
+    # Indexer par date
+    from collections import defaultdict
+    sess_by_date = defaultdict(list)
+    for s in sessions:
+        sess_by_date[s.date].append(s.id)
+
+    # Charger toutes les attendances d'un coup
+    all_sess_ids = [s.id for s in sessions]
+    att_data = {}
+    if all_sess_ids:
+        rows = db.query(Attendance.session_id, Attendance.status).filter(
+            Attendance.session_id.in_(all_sess_ids),
+            *([Attendance.student_id.in_(student_ids_scope)] if student_ids_scope else [])
+        ).all()
+        for sid, status in rows:
+            if sid not in att_data:
+                att_data[sid] = {"total": 0, "present": 0}
+            att_data[sid]["total"] += 1
+            if status == "present":
+                att_data[sid]["present"] += 1
+
     result = []
-    today  = datetime.now(timezone.utc).date()
-
     for i in range(29, -1, -1):
-        day      = today - timedelta(days=i)
-        sess_q   = db.query(SessionModel).filter(SessionModel.date == day)
-        if classe: sess_q = sess_q.filter(SessionModel.classe == classe)
-        sessions = sess_q.all()
-
+        day = today - timedelta(days=i)
+        sess_ids = sess_by_date.get(day, [])
         total = present = 0
-        for s in sessions:
-            att_q = db.query(Attendance).filter(Attendance.session_id == s.id)
-            if student_ids_scope:
-                att_q = att_q.filter(Attendance.student_id.in_(student_ids_scope))
-            t = att_q.count()
-            p = att_q.filter(Attendance.status == "present").count()
-            total   += t
-            present += p
-
+        for sid in sess_ids:
+            d = att_data.get(sid, {})
+            total   += d.get("total", 0)
+            present += d.get("present", 0)
         taux = round((present / total * 100), 1) if total > 0 else None
-        result.append({
-            "date":          str(day),
-            "taux_presence": taux,
-            "nb_sessions":   len(sessions),
-        })
+        result.append({"date": str(day), "taux_presence": taux, "nb_sessions": len(sess_ids)})
 
+    _cache_set(ck, result)
     return result
 
 
@@ -188,23 +235,34 @@ async def repartition_statuts(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
+    ck = f"repartition|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck)
+    if cached: return cached
+
     ids = _student_ids(db, classe, annee_scolaire)
     if not ids:
         return {"present":0,"absent":0,"retard":0,"total":0,
                 "pct_present":0,"pct_absent":0,"pct_retard":0}
 
-    att_q   = db.query(Attendance).filter(Attendance.student_id.in_(ids))
-    present = att_q.filter(Attendance.status == "present").count()
-    absent  = att_q.filter(Attendance.status == "absent").count()
-    retard  = att_q.filter(Attendance.status == "retard").count()
+    # Une seule requête avec GROUP BY
+    rows = db.query(Attendance.status, func.count(Attendance.id)).filter(
+        Attendance.student_id.in_(ids)
+    ).group_by(Attendance.status).all()
+
+    counts = {r[0]: r[1] for r in rows}
+    present = counts.get("present", 0)
+    absent  = counts.get("absent",  0)
+    retard  = counts.get("retard",  0)
     total   = present + absent + retard
 
-    return {
+    result = {
         "present": present, "absent": absent, "retard": retard, "total": total,
         "pct_present": round(present / total * 100, 1) if total else 0,
         "pct_absent":  round(absent  / total * 100, 1) if total else 0,
         "pct_retard":  round(retard  / total * 100, 1) if total else 0,
     }
+    _cache_set(ck, result)
+    return result
 
 
 @router.get("/bi/etudiants-a-risque")
@@ -250,28 +308,41 @@ async def top_absences(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
+    ck = f"top_abs|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck)
+    if cached: return cached
+
     students = _students(db, classe, annee_scolaire)
     students = [s for s in students if s.is_enrolled]
+    ids      = [s.id for s in students]
     data     = []
 
-    for s in students:
-        absences = db.query(Attendance).filter(
-            Attendance.student_id == s.id, Attendance.status == "absent"
-        ).count()
-        total = db.query(Attendance).filter(Attendance.student_id == s.id).count()
-        taux  = round((absences / total * 100), 1) if total > 0 else 0
-        data.append({
-            "student_id":    str(s.id),
-            "nom":           s.nom,
-            "prenom":        s.prenom,
-            "classe":        s.classe,
-            "annee_scolaire": s.annee_scolaire,
-            "absences":      absences,
-            "taux_absence":  taux,
-        })
+    if ids:
+        # Une seule requête GROUP BY pour tous les étudiants
+        abs_rows = db.query(Attendance.student_id, func.count(Attendance.id)).filter(
+            Attendance.student_id.in_(ids), Attendance.status == "absent"
+        ).group_by(Attendance.student_id).all()
+        tot_rows = db.query(Attendance.student_id, func.count(Attendance.id)).filter(
+            Attendance.student_id.in_(ids)
+        ).group_by(Attendance.student_id).all()
+        abs_map = {str(r[0]): r[1] for r in abs_rows}
+        tot_map = {str(r[0]): r[1] for r in tot_rows}
+
+        for s in students:
+            sid      = str(s.id)
+            absences = abs_map.get(sid, 0)
+            total    = tot_map.get(sid, 0)
+            taux     = round((absences / total * 100), 1) if total > 0 else 0
+            data.append({
+                "student_id": sid, "nom": s.nom, "prenom": s.prenom,
+                "classe": s.classe, "annee_scolaire": s.annee_scolaire,
+                "absences": absences, "taux_absence": taux,
+            })
 
     data.sort(key=lambda x: x["absences"], reverse=True)
-    return data[:10]
+    result = data[:10]
+    _cache_set(ck, result)
+    return result
 
 
 @router.get("/bi/notes-par-matiere")
@@ -281,27 +352,32 @@ async def notes_par_matiere(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
+    ck = f"notes_mat|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck)
+    if cached: return cached
+
     mat_q = db.query(Matiere)
     if classe: mat_q = mat_q.filter(Matiere.classe == classe)
     matieres = mat_q.all()
+    mat_ids  = [m.id for m in matieres]
 
-    ids    = set(_student_ids(db, classe, annee_scolaire))
+    ids = set(_student_ids(db, classe, annee_scolaire)) if (classe or annee_scolaire) else None
+
+    # Une seule requête GROUP BY pour toutes les matières
+    grade_q = db.query(Grade.matiere_id, func.avg(Grade.note), func.count(Grade.id)).filter(
+        Grade.matiere_id.in_(mat_ids)
+    )
+    if ids: grade_q = grade_q.filter(Grade.student_id.in_(ids))
+    rows = grade_q.group_by(Grade.matiere_id).all()
+    grade_map = {str(r[0]): {"moy": round(float(r[1]), 2), "nb": r[2]} for r in rows}
+
     result = []
-
     for m in matieres:
-        grade_q = db.query(Grade).filter(Grade.matiere_id == m.id)
-        if ids: grade_q = grade_q.filter(Grade.student_id.in_(ids))
-        grades = grade_q.all()
-        if not grades:
-            continue
-        moyenne = round(sum(g.note for g in grades) / len(grades), 2)
-        result.append({
-            "matiere":  m.nom,
-            "code":     m.code,
-            "moyenne":  moyenne,
-            "nb_notes": len(grades),
-        })
+        d = grade_map.get(str(m.id))
+        if not d: continue
+        result.append({"matiere": m.nom, "code": m.code, "moyenne": d["moy"], "nb_notes": d["nb"]})
 
+    _cache_set(ck, result)
     return result
 
 
@@ -332,23 +408,28 @@ async def alertes_recentes(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    ids = set(_student_ids(db, classe, annee_scolaire))
+    ck = f"alertes|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck)
+    if cached: return cached
 
-    q = db.query(Alert).filter(
-        Alert.target_role == "admin",
-        Alert.is_read == False
-    )
+    ids = set(_student_ids(db, classe, annee_scolaire)) if (classe or annee_scolaire) else None
+    q = db.query(Alert).filter(Alert.target_role == "admin", Alert.is_read == False)
     if ids: q = q.filter(Alert.student_id.in_(ids))
-
     alerts = q.order_by(Alert.created_at.desc()).limit(10).all()
-    return [{
-        "id":         str(a.id),
-        "type":       a.type,
-        "message":    a.message,
-        "severity":   a.severity,
-        "created_at": str(a.created_at),
+    result = [{
+        "id": str(a.id), "type": a.type, "message": a.message,
+        "severity": a.severity, "created_at": str(a.created_at),
         "student_id": str(a.student_id),
     } for a in alerts]
+    _cache_set(ck, result)
+    return result
+
+
+@router.post("/bi/cache-clear")
+async def clear_cache(_=Depends(admin_only)):
+    """Vider le cache BI (appelé automatiquement après modification de données)."""
+    _cache_clear()
+    return {"ok": True}
 
 
 @router.get("/bi/prediction-risque")
@@ -358,48 +439,97 @@ async def prediction_risque(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    students = _students(db, classe, annee_scolaire)
-    today   = datetime.now(timezone.utc).date()
-    cutoff  = today - timedelta(days=14)
+    ck = f"prediction|{classe}|{annee_scolaire}"
+    cached = _cache_get(ck, ttl=_CACHE_TTL_PREDICT)
+    if cached is not None:
+        return cached
 
+    students = _students(db, classe, annee_scolaire)
+    if not students:
+        result = {"etudiants": [], "stats": {"critique": 0, "eleve": 0, "modere": 0, "faible": 0, "total": 0}}
+        _cache_set(ck, result)
+        return result
+
+    today  = datetime.now(timezone.utc).date()
+    cutoff = today - timedelta(days=14)
+    s_ids  = [s.id for s in students]
+
+    # ── Bulk query 1 : total attendances per student ──────────────────────────
+    att_total_rows = db.query(Attendance.student_id, func.count(Attendance.id)).filter(
+        Attendance.student_id.in_(s_ids)
+    ).group_by(Attendance.student_id).all()
+    att_total_map = {str(sid): cnt for sid, cnt in att_total_rows}
+
+    # ── Bulk query 2 : absences per student ───────────────────────────────────
+    att_abs_rows = db.query(Attendance.student_id, func.count(Attendance.id)).filter(
+        Attendance.student_id.in_(s_ids), Attendance.status == "absent"
+    ).group_by(Attendance.student_id).all()
+    att_abs_map = {str(sid): cnt for sid, cnt in att_abs_rows}
+
+    # ── Bulk query 3 : recent sessions (last 14 days) per classe ─────────────
+    classes = list({s.classe for s in students if s.classe})
+    recent_sessions = db.query(SessionModel).filter(
+        SessionModel.classe.in_(classes), SessionModel.date >= cutoff
+    ).all()
+    sess_by_classe: dict = {}
+    for sess in recent_sessions:
+        sess_by_classe.setdefault(sess.classe, []).append(sess.id)
+    all_recent_ids = [sess.id for sess in recent_sessions]
+
+    # ── Bulk query 4 : recent total attendance ────────────────────────────────
+    r_total_map: dict = {}
+    r_abs_map:   dict = {}
+    if all_recent_ids:
+        r_total_rows = db.query(Attendance.student_id, func.count(Attendance.id)).filter(
+            Attendance.student_id.in_(s_ids),
+            Attendance.session_id.in_(all_recent_ids)
+        ).group_by(Attendance.student_id).all()
+        r_total_map = {str(sid): cnt for sid, cnt in r_total_rows}
+
+        r_abs_rows = db.query(Attendance.student_id, func.count(Attendance.id)).filter(
+            Attendance.student_id.in_(s_ids),
+            Attendance.session_id.in_(all_recent_ids),
+            Attendance.status == "absent"
+        ).group_by(Attendance.student_id).all()
+        r_abs_map = {str(sid): cnt for sid, cnt in r_abs_rows}
+
+    # ── Bulk query 5 : weighted averages ─────────────────────────────────────
+    from collections import defaultdict
+    grade_rows = db.query(Grade, Matiere).join(
+        Matiere, Grade.matiere_id == Matiere.id
+    ).filter(Grade.student_id.in_(s_ids)).all()
+    grade_map: dict = defaultdict(list)
+    for g, m in grade_rows:
+        grade_map[str(g.student_id)].append((g.note, m.coefficient))
+
+    def _avg(pairs):
+        if not pairs: return 0.0
+        tw = sum(c for _, c in pairs)
+        ws = sum(n * c for n, c in pairs)
+        return round(ws / tw, 2) if tw > 0 else 0.0
+
+    # ── Build results in Python (no more per-student queries) ────────────────
     results = []
     for s in students:
-        total_att   = db.query(Attendance).filter(Attendance.student_id == s.id).count()
-        nb_absences = db.query(Attendance).filter(
-            Attendance.student_id == s.id, Attendance.status == "absent"
-        ).count()
+        sid          = str(s.id)
+        total_att    = att_total_map.get(sid, 0)
+        nb_absences  = att_abs_map.get(sid, 0)
         taux_absence = round(nb_absences / total_att * 100, 1) if total_att > 0 else 0
 
-        # Tendance sur les 14 derniers jours
-        recent_sess_ids = [
-            sess.id for sess in db.query(SessionModel).filter(
-                SessionModel.classe == s.classe, SessionModel.date >= cutoff
-            ).all()
-        ]
-        if recent_sess_ids:
-            r_total = db.query(Attendance).filter(
-                Attendance.student_id == s.id,
-                Attendance.session_id.in_(recent_sess_ids)
-            ).count()
-            r_abs = db.query(Attendance).filter(
-                Attendance.student_id == s.id,
-                Attendance.session_id.in_(recent_sess_ids),
-                Attendance.status == "absent"
-            ).count()
-            r_taux = round(r_abs / r_total * 100, 1) if r_total > 0 else taux_absence
-            if r_taux > taux_absence * 1.25:
-                tendance = "en hausse"
-            elif r_taux < taux_absence * 0.75:
-                tendance = "en amélioration"
-            else:
-                tendance = "stable"
+        r_total = r_total_map.get(sid, 0)
+        r_abs   = r_abs_map.get(sid, 0)
+        if r_total > 0:
+            r_taux = round(r_abs / r_total * 100, 1)
+            if r_taux > taux_absence * 1.25:   tendance = "en hausse"
+            elif r_taux < taux_absence * 0.75: tendance = "en amélioration"
+            else:                              tendance = "stable"
         else:
             tendance = "stable"
 
-        moyenne    = get_average_by_student(db, s.id)
-        has_grades = db.query(Grade).filter(Grade.student_id == s.id).count() > 0
+        pairs      = grade_map.get(sid, [])
+        moyenne    = _avg(pairs)
+        has_grades = bool(pairs)
 
-        # Score de risque (0-100)
         absence_score = (0.6 * min(nb_absences / 8.0, 1.0) + 0.4 * taux_absence / 100.0) * 100
         grade_score   = max(0, (10 - moyenne) / 10.0 * 100) if has_grades and moyenne > 0 else 0
         trend_score   = {"en hausse": 80, "stable": 30, "en amélioration": 0}.get(tendance, 30)
@@ -411,7 +541,7 @@ async def prediction_risque(
         else:             niveau = "faible"
 
         results.append({
-            "student_id": str(s.id),
+            "student_id": sid,
             "nom": s.nom, "prenom": s.prenom,
             "classe": s.classe, "annee_scolaire": s.annee_scolaire,
             "score_risque": score, "niveau_risque": niveau,
@@ -421,11 +551,9 @@ async def prediction_risque(
         })
 
     results.sort(key=lambda x: x["score_risque"], reverse=True)
-
-    # Libérer la connexion DB avant l'appel Claude (qui peut prendre plusieurs secondes)
     db.close()
 
-    # Analyse Claude pour les étudiants à risque modéré ou plus
+    # ── Claude analysis (called once for all at-risk students) ────────────────
     at_risk = [r for r in results if r["score_risque"] >= 20][:6]
     if at_risk:
         try:
@@ -475,4 +603,6 @@ async def prediction_risque(
         "faible":   sum(1 for r in results if r["niveau_risque"] == "faible"),
         "total":    len(results),
     }
-    return {"etudiants": results, "stats": stats}
+    payload = {"etudiants": results, "stats": stats}
+    _cache_set(ck, payload)
+    return payload

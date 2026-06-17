@@ -413,8 +413,19 @@ def process_image(image_path: str, threshold: float, save: bool, offline: bool):
         print(f"  Source : attendance_config.json (calibration automatique)")
     print(f"{'='*70}\n")
 
+    # Upscaler les petites images pour améliorer la détection
+    h, w = frame.shape[:2]
+    if max(h, w) < 600:
+        scale = 600 / max(h, w)
+        frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
+        print(f"[INFO] Image upscalée : {w}x{h} → {frame.shape[1]}x{frame.shape[0]}")
+
+    # Convertir BGRA→BGR si PNG avec canal alpha
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
     print("[INFO] Detection en cours...", flush=True)
-    faces = detect_faces_classroom(frame, min_face_size=15, min_score=0.30)
+    faces = detect_faces_classroom(frame, min_face_size=15, min_score=0.10)
     print(f"[INFO] {len(faces)} visage(s) detecte(s)\n")
 
     faces = sorted(faces, key=lambda f: (f["bbox"][1], f["bbox"][0]))

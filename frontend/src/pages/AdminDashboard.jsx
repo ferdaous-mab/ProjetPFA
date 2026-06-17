@@ -131,7 +131,6 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   const [prediction,  setPrediction]  = useState(null);
   const [predLoading, setPredLoading] = useState(false);
   const [activeTab,   setActiveTab]   = useState("overview");
-  const [loading,     setLoading]     = useState(true);
   const [showVoice,   setShowVoice]   = useState(false);
 
   // Gestion state
@@ -152,6 +151,11 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   const [selectedEtudiant, setSelectedEtudiant] = useState(null);
   const [editForm,          setEditForm]          = useState({});
   const [editLoading,       setEditLoading]       = useState(false);
+
+  // Modal professeur
+  const [selectedProf,   setSelectedProf]   = useState(null);
+  const [editProfForm,   setEditProfForm]   = useState({});
+  const [editProfLoading,setEditProfLoading]= useState(false);
 
   // Comptes orphelins
   const [orphelins,     setOrphelins]     = useState([]);
@@ -203,35 +207,22 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   useEffect(() => { if (activeTab === "gestion" && gTab === "notes")    loadNotes();    }, [gTab]);
   useEffect(() => { if (activeTab === "gestion" && gTab === "sessions") loadSessions(); }, [gTab]);
 
-  const loadBI = async () => {
-    setLoading(true);
+  const loadBI = () => {
     const p = [];
     if (gf.classe)  p.push(`classe=${encodeURIComponent(gf.classe)}`);
     if (gf.niveau)  p.push(`annee_scolaire=${encodeURIComponent(gf.niveau)}`);
     const qs = p.length ? `?${p.join("&")}` : "";
-    try {
-      const [ov, pc, pm, ev, rp, rq, ta, nm, al] = await Promise.all([
-        axios.get(`${API_URL}/api/bi/overview${qs}`,             authHeaders()),
-        axios.get(`${API_URL}/api/bi/presence-par-classe${qs}`,  authHeaders()),
-        axios.get(`${API_URL}/api/bi/presence-par-matiere${qs}`, authHeaders()),
-        axios.get(`${API_URL}/api/bi/evolution-presences${qs}`,  authHeaders()),
-        axios.get(`${API_URL}/api/bi/repartition-statuts${qs}`,  authHeaders()),
-        axios.get(`${API_URL}/api/bi/etudiants-a-risque${qs}`,   authHeaders()),
-        axios.get(`${API_URL}/api/bi/top-absences${qs}`,         authHeaders()),
-        axios.get(`${API_URL}/api/bi/notes-par-matiere${qs}`,    authHeaders()),
-        axios.get(`${API_URL}/api/bi/alertes-recentes${qs}`,     authHeaders()),
-      ]);
-      setOverview(ov.data);
-      setPresClasse(pc.data);
-      setPresMat(pm.data);
-      setEvolution(ev.data.filter(d => d.taux_presence !== null));
-      setRepartition(rp.data);
-      setRisque(rq.data);
-      setTopAbsences(ta.data);
-      setNotesMat(nm.data);
-      setAlertes(al.data);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
+    const h  = authHeaders();
+    // Chaque requête indépendante — la page s'affiche immédiatement
+    axios.get(`${API_URL}/api/bi/overview${qs}`, h).then(r => setOverview(r.data)).catch(() => {});
+    axios.get(`${API_URL}/api/bi/presence-par-classe${qs}`, h).then(r => setPresClasse(r.data)).catch(() => {});
+    axios.get(`${API_URL}/api/bi/presence-par-matiere${qs}`, h).then(r => setPresMat(r.data)).catch(() => {});
+    axios.get(`${API_URL}/api/bi/evolution-presences${qs}`, h).then(r => setEvolution(r.data.filter(d => d.taux_presence !== null))).catch(() => {});
+    axios.get(`${API_URL}/api/bi/repartition-statuts${qs}`, h).then(r => setRepartition(r.data)).catch(() => {});
+    axios.get(`${API_URL}/api/bi/etudiants-a-risque${qs}`, h).then(r => setRisque(r.data)).catch(() => {});
+    axios.get(`${API_URL}/api/bi/top-absences${qs}`, h).then(r => setTopAbsences(r.data)).catch(() => {});
+    axios.get(`${API_URL}/api/bi/notes-par-matiere${qs}`, h).then(r => setNotesMat(r.data)).catch(() => {});
+    axios.get(`${API_URL}/api/bi/alertes-recentes${qs}`, h).then(r => setAlertes(r.data)).catch(() => {});
   };
 
   const loadPrediction = async () => {
@@ -360,6 +351,22 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
       setFormProf({ nom:"", prenom:"", email:"" });
       loadGestion();
     } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
+  };
+
+  const openProf = (p) => {
+    setSelectedProf(p);
+    setEditProfForm({ nom: p.nom, prenom: p.prenom, email: p.email });
+  };
+
+  const saveProf = async () => {
+    setEditProfLoading(true);
+    try {
+      await axios.put(`${API_URL}/api/gestion/professeurs/${selectedProf.id}`, editProfForm, authHeaders());
+      showMsg("✅ Professeur mis à jour !");
+      await loadGestion();
+      setSelectedProf(prev => ({ ...prev, ...editProfForm }));
+    } catch (e) { showMsg("❌ " + (e.response?.data?.detail || "Erreur")); }
+    finally { setEditProfLoading(false); }
   };
 
   const deactivateProf = async (id) => {
@@ -721,43 +728,49 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                   </div>
                 )}
 
-                {/* ─── Infos étudiant (lecture seule pour l'admin) ─── */}
+                {/* ─── Infos étudiant (éditables par l'admin) ─── */}
                 <div style={{ marginTop: 16 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
                     paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                     <span style={{ fontSize: 14 }}>👤</span>
                     <span style={{ fontWeight: 600, fontSize: 13, color: "rgba(255,255,255,0.5)" }}>Informations étudiant</span>
-                    <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.25)",
-                      background: "rgba(255,255,255,0.05)", padding: "2px 8px",
-                      borderRadius: 20, fontWeight: 600, letterSpacing: "0.06em" }}>MODIFIABLES PAR L'ÉTUDIANT</span>
+                    <span style={{ marginLeft: "auto", fontSize: 10, color: "#6366f1",
+                      background: "rgba(99,102,241,0.12)", padding: "2px 8px",
+                      borderRadius: 20, fontWeight: 600, letterSpacing: "0.06em" }}>MODIFIABLES</span>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                     {[
-                      ["Nom",              s.nom],
-                      ["Prénom",           s.prenom],
-                      ["Email",            s.email],
-                      ["Téléphone",        s.telephone],
-                      ["Adresse",          s.adresse],
-                      ["Ville",            s.ville],
-                      ["Date naissance",   s.date_naissance],
-                      ["Lieu naissance",   s.lieu_naissance],
-                      ["Sexe",             s.sexe === "M" ? "Masculin" : s.sexe === "F" ? "Féminin" : null],
-                      ["CIN",              s.cin],
-                      ["Classe",           s.classe],
-                      ["Année scolaire",   s.annee_scolaire],
-                      ["N° Carte étudiant",s.numero_carte],
-                    ].map(([label, val]) => (
-                      <div key={label}>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.25)",
-                          letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
-                        <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.02)",
-                          border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8,
-                          fontSize: 12, color: val ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.18)",
-                          minHeight: 34, display: "flex", alignItems: "center" }}>
-                          {val || "—"}
-                        </div>
+                      ["Nom",               "nom"],
+                      ["Prénom",            "prenom"],
+                      ["Email",             "email"],
+                      ["Téléphone",         "telephone"],
+                      ["Adresse",           "adresse"],
+                      ["Ville",             "ville"],
+                      ["Date naissance",    "date_naissance"],
+                      ["Lieu naissance",    "lieu_naissance"],
+                      ["CIN",               "cin"],
+                      ["Classe",            "classe"],
+                      ["Année scolaire",    "annee_scolaire"],
+                      ["N° Carte étudiant", "numero_carte"],
+                    ].map(([label, key]) => (
+                      <div key={key}>
+                        <LBL>{label}</LBL>
+                        <Input value={ef[key] || ""} placeholder={label}
+                          type={key === "date_naissance" ? "date" : key === "email" ? "email" : "text"}
+                          onChange={e => set(key, e.target.value)} />
                       </div>
                     ))}
+                    <div>
+                      <LBL>Sexe</LBL>
+                      <select value={ef.sexe || ""} onChange={e => set("sexe", e.target.value)}
+                        style={{ width: "100%", padding: "10px 14px", background: "#0d0d1a",
+                          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10,
+                          color: "#fff", fontSize: 13, fontFamily: "Sora, sans-serif", outline: "none", boxSizing: "border-box" }}>
+                        <option value="">—</option>
+                        <option value="M">Masculin</option>
+                        <option value="F">Féminin</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
 
@@ -821,6 +834,67 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
           </div>
         );
       })()}
+
+      {/* Modal Professeur */}
+      {selectedProf && (
+        <div onClick={() => setSelectedProf(null)} style={{
+          position: "fixed", inset: 0, zIndex: 200,
+          background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)",
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "#0b0b18", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 20, width: "100%", maxWidth: 480,
+            boxShadow: "0 32px 100px rgba(0,0,0,0.7)",
+          }}>
+            <div style={{
+              padding: "22px 28px 18px", borderBottom: "1px solid rgba(255,255,255,0.07)",
+              display: "flex", alignItems: "center", gap: 16,
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{selectedProf.prenom} {selectedProf.nom}</div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 4 }}>
+                  Modifier les informations du professeur
+                </div>
+              </div>
+              <button onClick={() => setSelectedProf(null)} style={{
+                background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 8, color: "rgba(255,255,255,0.5)", cursor: "pointer",
+                width: 32, height: 32, fontSize: 16,
+              }}>✕</button>
+            </div>
+            <div style={{ padding: "24px 28px 28px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.3)",
+                  letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>NOM</div>
+                <Input value={editProfForm.nom || ""} placeholder="Nom"
+                  onChange={e => setEditProfForm(f => ({ ...f, nom: e.target.value }))} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.3)",
+                  letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>PRÉNOM</div>
+                <Input value={editProfForm.prenom || ""} placeholder="Prénom"
+                  onChange={e => setEditProfForm(f => ({ ...f, prenom: e.target.value }))} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.3)",
+                  letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>EMAIL</div>
+                <Input value={editProfForm.email || ""} placeholder="Email" type="email"
+                  onChange={e => setEditProfForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                <Btn onClick={saveProf} style={{ flex: 1, padding: "11px", opacity: editProfLoading ? 0.6 : 1 }}>
+                  {editProfLoading ? "Enregistrement..." : "💾 Enregistrer"}
+                </Btn>
+                <Btn onClick={() => setSelectedProf(null)} color="rgba(255,255,255,0.06)"
+                  style={{ padding: "11px 22px", color: "rgba(255,255,255,0.5)" }}>
+                  Annuler
+                </Btn>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Voice Assistant Modal */}
       {showVoice && (
@@ -987,16 +1061,8 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
       </div>
 
       <div className="page-body">
-        {loading && activeTab !== "gestion" && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
-            justifyContent: "center", gap: 16, padding: "80px 20px" }}>
-            <div className="sc-spinner" />
-            <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, fontWeight: 500 }}>Chargement...</span>
-          </div>
-        )}
-
         {/* Vue d'ensemble */}
-        {!loading && activeTab === "overview" && (
+        {activeTab === "overview" && (
           <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <div style={{ display: "grid", gridTemplateColumns: bp.colsAuto, gap: bp.gap2 }}>
               <StatCard icon="🎓" label="Étudiants" color="#6366f1"
@@ -1080,7 +1146,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
         )}
 
         {/* Présences */}
-        {!loading && activeTab === "presences" && (
+        {activeTab === "presences" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <Card>
               <SectionTitle title="Taux par matière" icon="📚" />
@@ -1143,7 +1209,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
         )}
 
         {/* Risques */}
-        {!loading && activeTab === "risques" && (
+        {activeTab === "risques" && (
           <Card>
             <SectionTitle title="Étudiants à risque" icon="⚠️" />
             {risque.length === 0 ? <EmptyState message="Aucun étudiant à risque 🎉" /> :
@@ -1187,7 +1253,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
         )}
 
         {/* Notes */}
-        {!loading && activeTab === "notes" && (
+        {activeTab === "notes" && (
           <Card>
             <SectionTitle title="Moyenne par matière" icon="📝" />
             {notesMat.length === 0 ? <EmptyState message="Aucune note" /> :
@@ -1210,7 +1276,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
         )}
 
         {/* Alertes */}
-        {!loading && activeTab === "alertes" && (
+        {activeTab === "alertes" && (
           <Card>
             <SectionTitle title="Alertes récentes" icon="🔔" />
             {alertes.length === 0 ? <EmptyState message="Aucune alerte ✅" /> :
@@ -1645,7 +1711,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                         display: "flex", alignItems: "center", justifyContent: "space-between",
                         padding: "12px 0", borderBottom: i < profs.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
                       }}>
-                        <div style={{ flex: 1 }}>
+                        <div style={{ flex: 1, cursor: "pointer" }} onClick={() => openProf(p)}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={{ fontWeight: 500, fontSize: 14 }}>{p.prenom} {p.nom}</span>
                             <span style={{
@@ -1676,6 +1742,10 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                           )}
                         </div>
                         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          <Btn onClick={() => openProf(p)} color="rgba(99,102,241,0.2)"
+                            style={{ padding: "6px 12px", fontSize: 12, border: "1px solid rgba(99,102,241,0.4)", color: "#a5b4fc" }}>
+                            ✏️ Modifier
+                          </Btn>
                           <Btn onClick={() => resetProfPassword(p.id, p.nom, p.prenom)}
                             color="rgba(245,158,11,0.2)"
                             style={{ padding: "6px 12px", fontSize: 12, border: "1px solid rgba(245,158,11,0.4)", color: "#f59e0b" }}>

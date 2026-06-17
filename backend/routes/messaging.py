@@ -1,7 +1,7 @@
 from typing import Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc
+from sqlalchemy import or_, and_, desc, func
 from pydantic import BaseModel
 from db.models import Message, User
 from auth.dependencies import get_current_user, get_db
@@ -68,42 +68,50 @@ def get_contacts(
             User.id != current_user.id, User.is_active == True
         ).order_by(User.nom).all()
 
+    uid = current_user.id
+
+    # 1 query : unread counts per sender
+    unread_rows = db.query(Message.sender_id, func.count(Message.id)).filter(
+        Message.receiver_id == uid,
+        Message.is_read     == False,
+        Message.is_deleted  == False,
+    ).group_by(Message.sender_id).all()
+    unread_map = {str(sid): cnt for sid, cnt in unread_rows}
+
+    # 1 query : all messages involving current_user, latest first
+    all_msgs = db.query(Message).filter(
+        or_(Message.sender_id == uid, Message.receiver_id == uid)
+    ).order_by(desc(Message.created_at)).all()
+
+    # Build last_message map (first occurrence per contact = most recent)
+    last_map: dict = {}
+    for m in all_msgs:
+        cid = str(m.receiver_id) if m.sender_id == uid else str(m.sender_id)
+        if cid not in last_map:
+            last_map[cid] = m
+
     result = []
     for c in users:
-        unread = db.query(Message).filter(
-            Message.sender_id   == c.id,
-            Message.receiver_id == current_user.id,
-            Message.is_read     == False,
-            Message.is_deleted  == False,
-        ).count()
-
-        last = db.query(Message).filter(
-            or_(
-                and_(Message.sender_id == current_user.id, Message.receiver_id == c.id),
-                and_(Message.sender_id == c.id, Message.receiver_id == current_user.id),
-            )
-        ).order_by(desc(Message.created_at)).first()
-
+        cid     = str(c.id)
+        last    = last_map.get(cid)
         last_msg = None
         if last:
             preview = "Message supprimé" if last.is_deleted else last.content
             last_msg = {
                 "content":    preview[:60] + ("…" if len(preview) > 60 else ""),
                 "created_at": last.created_at.isoformat(),
-                "is_mine":    last.sender_id == current_user.id,
+                "is_mine":    last.sender_id == uid,
             }
-
         result.append({
-            "id":           str(c.id),
+            "id":           cid,
             "nom":          c.nom,
             "prenom":       c.prenom,
             "role":         c.role,
-            "online":       manager.is_online(str(c.id)),
-            "unread":       unread,
+            "online":       manager.is_online(cid),
+            "unread":       unread_map.get(cid, 0),
             "last_message": last_msg,
         })
 
-    # Trier : conversations récentes d'abord, sans conversation en bas
     result.sort(key=lambda x: x["last_message"]["created_at"] if x["last_message"] else "", reverse=True)
     return result
 

@@ -28,6 +28,12 @@ class ProfCreate(BaseModel):
     password: Optional[str] = None
 
 
+class ProfUpdate(BaseModel):
+    nom:    Optional[str] = None
+    prenom: Optional[str] = None
+    email:  Optional[str] = None
+
+
 class MatiereCreate(BaseModel):
     nom:           str
     code:          Optional[str] = None
@@ -136,6 +142,27 @@ async def deactivate_professeur(
     user.is_active = False
     db.commit()
     return {"success": True, "message": "Compte désactivé"}
+
+
+@router.put("/gestion/professeurs/{prof_id}")
+async def update_professeur(
+    prof_id: str,
+    req: ProfUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Modifier les informations d'un professeur."""
+    user = db.query(User).filter(User.id == prof_id, User.role == "professeur").first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Professeur introuvable")
+    if req.email and req.email != user.email:
+        if db.query(User).filter(User.email == req.email).first():
+            raise HTTPException(status_code=400, detail="Email déjà utilisé")
+        user.email = req.email
+    if req.nom:    user.nom    = req.nom
+    if req.prenom: user.prenom = req.prenom
+    db.commit()
+    return {"success": True, "message": "Professeur mis à jour"}
 
 
 @router.put("/gestion/professeurs/{prof_id}/reactivate")
