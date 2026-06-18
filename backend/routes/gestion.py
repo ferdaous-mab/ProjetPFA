@@ -9,7 +9,7 @@ import secrets
 import string
 from db.crud import (
     create_user, get_user_by_email, get_users_by_role,
-    create_matiere, get_all_matieres, get_matiere_by_id,
+    create_matiere, get_matiere_by_id,
     create_emploi_temps,
     get_all_students, delete_student,
 )
@@ -68,19 +68,32 @@ async def get_professeurs(
 ):
     """Liste tous les professeurs."""
     profs = get_users_by_role(db, "professeur")
+    if not profs:
+        return []
+
+    prof_ids = [p.id for p in profs]
+
+    # Récupérer toutes les matières liées en une seule requête
+    matieres_rows = db.query(Matiere.professeur_id, Matiere.nom).filter(
+        Matiere.professeur_id.in_(prof_ids)
+    ).all()
+
+    # Regrouper par prof_id
+    matieres_map: dict = {}
+    for pid, nom in matieres_rows:
+        matieres_map.setdefault(pid, []).append(nom)
+
     result = []
     for p in profs:
-        matieres = db.query(Matiere).filter(
-            Matiere.professeur_id == p.id
-        ).all()
+        ms = matieres_map.get(p.id, [])
         result.append({
-            "id":         str(p.id),
-            "nom":        p.nom,
-            "prenom":     p.prenom,
-            "email":      p.email,
-            "is_active":  p.is_active,
-            "nb_matieres": len(matieres),
-            "matieres":   [m.nom for m in matieres],
+            "id":          str(p.id),
+            "nom":         p.nom,
+            "prenom":      p.prenom,
+            "email":       p.email,
+            "is_active":   p.is_active,
+            "nb_matieres": len(ms),
+            "matieres":    ms,
         })
     return result
 
@@ -202,22 +215,26 @@ async def get_matieres(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Liste toutes les matières."""
-    matieres = get_all_matieres(db)
-    result   = []
-    for m in matieres:
-        prof = db.query(User).filter(User.id == m.professeur_id).first() if m.professeur_id else None
-        result.append({
-            "id":           str(m.id),
-            "nom":          m.nom,
-            "code":         m.code,
-            "coefficient":  m.coefficient,
-            "classe":       m.classe,
+    """Liste toutes les matières (JOIN unique sur User)."""
+    rows = (
+        db.query(Matiere, User)
+        .outerjoin(User, Matiere.professeur_id == User.id)
+        .order_by(Matiere.annee_scolaire, Matiere.classe, Matiere.nom)
+        .all()
+    )
+    return [
+        {
+            "id":             str(m.id),
+            "nom":            m.nom,
+            "code":           m.code,
+            "coefficient":    m.coefficient,
+            "classe":         m.classe,
             "annee_scolaire": m.annee_scolaire,
-            "professeur":   f"{prof.prenom} {prof.nom}" if prof else None,
-            "professeur_id": str(m.professeur_id) if m.professeur_id else None,
-        })
-    return result
+            "professeur":     f"{u.prenom} {u.nom}" if u else None,
+            "professeur_id":  str(m.professeur_id) if m.professeur_id else None,
+        }
+        for m, u in rows
+    ]
 
 
 @router.post("/gestion/matieres")
@@ -278,23 +295,28 @@ async def get_emplois(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Liste tous les créneaux — liste plate avec niveau depuis la matière."""
-    emplois = db.query(EmploiTemps).order_by(EmploiTemps.jour, EmploiTemps.heure_debut).all()
-    result  = []
-    for e in emplois:
-        matiere = get_matiere_by_id(db, str(e.matiere_id))
-        result.append({
-            "id":            str(e.id),
-            "matiere":       matiere.nom           if matiere else "?",
-            "matiere_id":    str(e.matiere_id),
-            "niveau":        matiere.annee_scolaire if matiere else "?",
-            "groupe":        e.classe,
-            "jour":          e.jour,
-            "heure_debut":   str(e.heure_debut),
-            "heure_fin":     str(e.heure_fin),
-            "salle":         e.salle,
-        })
-    return result
+    """Liste tous les créneaux (JOIN unique sur Matiere)."""
+    rows = (
+        db.query(EmploiTemps, Matiere)
+        .join(Matiere, EmploiTemps.matiere_id == Matiere.id)
+        .order_by(Matiere.annee_scolaire, EmploiTemps.classe,
+                  EmploiTemps.jour, EmploiTemps.heure_debut)
+        .all()
+    )
+    return [
+        {
+            "id":          str(e.id),
+            "matiere":     m.nom,
+            "matiere_id":  str(e.matiere_id),
+            "niveau":      m.annee_scolaire,
+            "groupe":      e.classe,
+            "jour":        e.jour,
+            "heure_debut": str(e.heure_debut),
+            "heure_fin":   str(e.heure_fin),
+            "salle":       e.salle,
+        }
+        for e, m in rows
+    ]
 
 
 @router.post("/gestion/emplois")
@@ -827,12 +849,13 @@ async def delete_note(
 # ── ALERTES MANUELLES ─────────────────────────────────────────────────────────
 
 class AlerteManuelle(BaseModel):
-    message:     str
-    type:        str = "information"   # information | avertissement | convocation
-    severity:    str = "low"           # low | medium | high
-    student_id:  Optional[str] = None  # cibler un étudiant précis
-    classe:      Optional[str] = None  # cibler toute une classe
-    target_role: str = "etudiant"
+    message:        str
+    type:           str = "information"   # information | avertissement | convocation
+    severity:       str = "low"           # low | medium | high
+    student_id:     Optional[str] = None  # cibler un étudiant précis
+    classe:         Optional[str] = None  # cibler toute une classe
+    annee_scolaire: Optional[str] = None  # niveau scolaire pour filtrer la classe
+    target_role:    str = "etudiant"
 
 
 @router.post("/gestion/alertes")
@@ -841,7 +864,7 @@ async def creer_alerte_manuelle(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Créer une alerte manuelle pour un étudiant ou tous les étudiants d'une classe."""
+    """Créer une alerte manuelle pour un étudiant ou tous les étudiants d'une classe/niveau."""
     if not req.student_id and not req.classe:
         raise HTTPException(status_code=400, detail="Fournir un student_id ou une classe")
 
@@ -852,7 +875,10 @@ async def creer_alerte_manuelle(
             raise HTTPException(status_code=404, detail="Étudiant introuvable")
         targets = [s]
     else:
-        targets = db.query(Student).filter(Student.classe == req.classe).all()
+        query = db.query(Student).filter(Student.classe == req.classe)
+        if req.annee_scolaire:
+            query = query.filter(Student.annee_scolaire == req.annee_scolaire)
+        targets = query.all()
         if not targets:
             raise HTTPException(status_code=404, detail="Aucun étudiant dans cette classe")
 
@@ -875,35 +901,53 @@ async def creer_alerte_manuelle(
 
 @router.get("/gestion/sessions")
 async def get_sessions(
-    classe:    Optional[str] = None,
+    classe:     Optional[str] = None,
     matiere_id: Optional[str] = None,
+    niveau:     Optional[str] = None,
+    limit:      int = 60,
+    offset:     int = 0,
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Liste toutes les séances de cours."""
     from db.models import Session as SessionModel
-    q = db.query(SessionModel)
+    from sqlalchemy import case, func as sqlfunc
+
+    # ── Une seule requête : sessions + matière + stats présence ──────────────
+    total_att  = sqlfunc.count(Attendance.id).label("total_att")
+    present_ct = sqlfunc.sum(
+        case((Attendance.status == "present", 1), else_=0)
+    ).label("present_ct")
+
+    q = (
+        db.query(SessionModel, Matiere, total_att, present_ct)
+        .join(Matiere, SessionModel.matiere_id == Matiere.id)
+        .outerjoin(Attendance, Attendance.session_id == SessionModel.id)
+        .group_by(SessionModel.id, Matiere.id)
+        .order_by(SessionModel.date.desc(), SessionModel.heure_debut)
+    )
+
     if classe:
         q = q.filter(SessionModel.classe == classe)
     if matiere_id:
         q = q.filter(SessionModel.matiere_id == matiere_id)
+    if niveau:
+        q = q.filter(Matiere.annee_scolaire == niveau)
 
-    sessions = q.order_by(SessionModel.date.desc()).all()
+    rows = q.offset(offset).limit(limit).all()
+
     result = []
-    for s in sessions:
-        matiere = db.query(Matiere).filter(Matiere.id == s.matiere_id).first()
-        total   = db.query(Attendance).filter(Attendance.session_id == s.id).count()
-        present = db.query(Attendance).filter(
-            Attendance.session_id == s.id, Attendance.status == "present"
-        ).count()
+    for s, mat, total, present in rows:
+        total   = total   or 0
+        present = present or 0
         result.append({
             "id":          str(s.id),
-            "matiere":     matiere.nom if matiere else "?",
+            "matiere":     mat.nom,
             "matiere_id":  str(s.matiere_id),
+            "niveau":      mat.annee_scolaire,
             "classe":      s.classe,
             "date":        str(s.date),
-            "heure_debut": str(s.heure_debut) if s.heure_debut else None,
-            "heure_fin":   str(s.heure_fin)   if s.heure_fin   else None,
+            "heure_debut": str(s.heure_debut)[:5] if s.heure_debut else None,
+            "heure_fin":   str(s.heure_fin)[:5]   if s.heure_fin   else None,
             "salle":       s.salle,
             "status":      s.status,
             "total_att":   total,
@@ -911,6 +955,64 @@ async def get_sessions(
             "taux":        round(present / total * 100, 1) if total else 0,
         })
     return result
+
+
+@router.get("/gestion/sessions/{session_id}/presences")
+async def get_presences_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Retourne la liste des étudiants avec leur statut de présence pour une séance."""
+    from db.models import Session as SessionModel
+    sess = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Séance introuvable")
+
+    matiere = db.query(Matiere).filter(Matiere.id == sess.matiere_id).first()
+
+    # Tous les étudiants du groupe
+    query = db.query(Student).filter(Student.classe == sess.classe)
+    if matiere and matiere.annee_scolaire:
+        query = query.filter(Student.annee_scolaire == matiere.annee_scolaire)
+    etudiants = query.order_by(Student.nom, Student.prenom).all()
+
+    # Présences enregistrées pour cette séance
+    att_map = {
+        str(a.student_id): a
+        for a in db.query(Attendance).filter(Attendance.session_id == session_id).all()
+    }
+
+    result = []
+    for s in etudiants:
+        att = att_map.get(str(s.id))
+        result.append({
+            "student_id": str(s.id),
+            "nom":        s.nom,
+            "prenom":     s.prenom,
+            "status":     att.status if att else "absent",
+            "detected_at": att.detected_at.strftime("%H:%M") if att and att.detected_at else None,
+            "confidence": round(att.confidence * 100) if att and att.confidence else None,
+        })
+
+    presents = sum(1 for r in result if r["status"] == "present")
+    retards  = sum(1 for r in result if r["status"] == "retard")
+    absents  = sum(1 for r in result if r["status"] == "absent")
+
+    return {
+        "session": {
+            "id":          session_id,
+            "matiere":     matiere.nom if matiere else "?",
+            "classe":      sess.classe,
+            "niveau":      matiere.annee_scolaire if matiere else "?",
+            "date":        str(sess.date),
+            "heure_debut": str(sess.heure_debut)[:5] if sess.heure_debut else None,
+            "heure_fin":   str(sess.heure_fin)[:5]   if sess.heure_fin   else None,
+            "salle":       sess.salle,
+        },
+        "stats": {"presents": presents, "retards": retards, "absents": absents, "total": len(result)},
+        "etudiants": result,
+    }
 
 
 @router.delete("/gestion/sessions/{session_id}")

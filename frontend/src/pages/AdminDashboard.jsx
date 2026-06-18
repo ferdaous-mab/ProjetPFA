@@ -181,11 +181,14 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
 
   // Sessions
   const [sessions,       setSessions]       = useState([]);
+  const [filterSNiveau,  setFilterSNiveau]  = useState("");
   const [filterSClasse,  setFilterSClasse]  = useState("");
   const [filterSMatiere, setFilterSMatiere] = useState("");
+  const [sessionOffset,  setSessionOffset]  = useState(0);
+  const SESSION_LIMIT = 60;
 
   // Alertes manuelles
-  const [formAlerte, setFormAlerte] = useState({ message:"", type:"information", severity:"medium", cible:"etudiant", student_id:"", classe:"" });
+  const [formAlerte, setFormAlerte] = useState({ message:"", type:"information", severity:"medium", cible:"etudiant", student_id:"", annee_scolaire:"", classe:"" });
   const [alerteMsg,  setAlerteMsg]  = useState("");
 
   // Modale alerte depuis Prédiction IA
@@ -518,10 +521,29 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   };
 
   // ── Sessions ──
-  const loadSessions = async () => {
+  const [sessionModal,    setSessionModal]    = useState(null);  // { session, stats, etudiants }
+  const [sessionModalLoading, setSessionModalLoading] = useState(false);
+
+  const openSessionModal = async (sessionId) => {
+    setSessionModalLoading(true);
+    setSessionModal({ loading: true });
     try {
-      const res = await axios.get(`${API_URL}/api/gestion/sessions`, authHeaders());
-      setSessions(res.data);
+      const res = await axios.get(`${API_URL}/api/gestion/sessions/${sessionId}/presences`, authHeaders());
+      setSessionModal(res.data);
+    } catch { setSessionModal(null); }
+    finally { setSessionModalLoading(false); }
+  };
+
+  const loadSessions = async (off = 0) => {
+    try {
+      let url = `${API_URL}/api/gestion/sessions?limit=${SESSION_LIMIT}&offset=${off}`;
+      if (filterSNiveau)  url += `&niveau=${encodeURIComponent(filterSNiveau)}`;
+      if (filterSClasse)  url += `&classe=${filterSClasse}`;
+      if (filterSMatiere) url += `&matiere_id=${filterSMatiere}`;
+      const res = await axios.get(url, authHeaders());
+      if (off === 0) setSessions(res.data);
+      else           setSessions(prev => [...prev, ...res.data]);
+      setSessionOffset(off);
     } catch {}
   };
 
@@ -536,7 +558,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   const sendAlerte = async () => {
     if (!formAlerte.message.trim()) return;
     if (formAlerte.cible === "etudiant" && !formAlerte.student_id) return;
-    if (formAlerte.cible === "classe"   && !formAlerte.classe)     return;
+    if (formAlerte.cible === "classe" && (!formAlerte.annee_scolaire || !formAlerte.classe)) return;
     try {
       const payload = {
         message:  formAlerte.message,
@@ -544,11 +566,11 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
         severity: formAlerte.severity,
         ...(formAlerte.cible === "etudiant"
           ? { student_id: formAlerte.student_id }
-          : { classe: formAlerte.classe }),
+          : { classe: formAlerte.classe, annee_scolaire: formAlerte.annee_scolaire }),
       };
       const res = await axios.post(`${API_URL}/api/gestion/alertes`, payload, authHeaders());
       setAlerteMsg(`ok:${res.data.nb_alertes}`);
-      setFormAlerte({ message:"", type:"information", severity:"medium", cible:"etudiant", student_id:"", classe:"" });
+      setFormAlerte({ message:"", type:"information", severity:"medium", cible:"etudiant", student_id:"", annee_scolaire:"", classe:"" });
     } catch (e) { setAlerteMsg("err:" + (e.response?.data?.detail || "Erreur")); }
     finally { setTimeout(() => setAlerteMsg(""), 4000); }
   };
@@ -2385,7 +2407,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                     {/* Cible */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                       <Select value={formAlerte.cible}
-                        onChange={e => setFormAlerte(f => ({...f, cible: e.target.value, student_id: "", classe: ""}))}>
+                        onChange={e => setFormAlerte(f => ({...f, cible: e.target.value, student_id: "", annee_scolaire: "", classe: ""}))}>
                         <option value="etudiant">Étudiant précis</option>
                         <option value="classe">Toute une classe</option>
                       </Select>
@@ -2394,15 +2416,27 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                           onChange={e => setFormAlerte(f => ({...f, student_id: e.target.value}))}>
                           <option value="">-- Choisir un étudiant --</option>
                           {etudiants.map(s => (
-                            <option key={s.id} value={s.id}>{s.prenom} {s.nom} ({s.classe})</option>
+                            <option key={s.id} value={s.id}>{s.prenom} {s.nom} ({s.annee_scolaire} - Grp {s.classe})</option>
                           ))}
                         </Select>
                       ) : (
-                        <Select value={formAlerte.classe}
-                          onChange={e => setFormAlerte(f => ({...f, classe: e.target.value}))}>
-                          <option value="">-- Choisir une classe --</option>
-                          {filterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
-                        </Select>
+                        <>
+                          <Select value={formAlerte.annee_scolaire}
+                            onChange={e => setFormAlerte(f => ({...f, annee_scolaire: e.target.value, classe: ""}))}>
+                            <option value="">-- Niveau scolaire --</option>
+                            {NIVEAUX.map(nv => (
+                              <option key={nv} value={nv}>{nv}</option>
+                            ))}
+                          </Select>
+                          <Select value={formAlerte.classe}
+                            onChange={e => setFormAlerte(f => ({...f, classe: e.target.value}))}
+                            disabled={!formAlerte.annee_scolaire}>
+                            <option value="">-- Groupe --</option>
+                            {GROUPES.map(g => (
+                              <option key={g} value={g}>Groupe {g}</option>
+                            ))}
+                          </Select>
+                        </>
                       )}
                     </div>
                     {/* Type + Sévérité */}
@@ -2437,7 +2471,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                       style={{
                         opacity: (!formAlerte.message.trim() ||
                           (formAlerte.cible === "etudiant" && !formAlerte.student_id) ||
-                          (formAlerte.cible === "classe"   && !formAlerte.classe)) ? 0.5 : 1,
+                          (formAlerte.cible === "classe" && (!formAlerte.annee_scolaire || !formAlerte.classe))) ? 0.5 : 1,
                       }}>
                       📣 Envoyer l'alerte
                     </Btn>
@@ -2459,28 +2493,139 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 {/* Filtres */}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Select value={filterSClasse} onChange={e => setFilterSClasse(e.target.value)} style={{ width: 130 }}>
-                    <option value="">Toutes classes</option>
-                    {filterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
+                  <Select value={filterSNiveau} onChange={e => { setFilterSNiveau(e.target.value); setFilterSClasse(""); }}
+                    style={{ flex: 1, minWidth: 160 }}>
+                    <option value="">Tous niveaux</option>
+                    {NIVEAUX.map(n => <option key={n} value={n}>{n}</option>)}
                   </Select>
-                  <Select value={filterSMatiere} onChange={e => setFilterSMatiere(e.target.value)} style={{ flex: 1, minWidth: 180 }}>
+                  <Select value={filterSClasse} onChange={e => setFilterSClasse(e.target.value)} style={{ width: 120 }}>
+                    <option value="">Tous groupes</option>
+                    {GROUPES.map(g => <option key={g} value={g}>Groupe {g}</option>)}
+                  </Select>
+                  <Select value={filterSMatiere} onChange={e => setFilterSMatiere(e.target.value)} style={{ flex: 1, minWidth: 160 }}>
                     <option value="">Toutes matières</option>
-                    {matieres.map(m => <option key={m.id} value={m.id}>{m.nom} ({m.classe})</option>)}
+                    {matieres.map(m => <option key={m.id} value={m.id}>{m.nom} ({m.annee_scolaire} {m.classe})</option>)}
                   </Select>
-                  <Btn onClick={() => {
-                    let url = `${API_URL}/api/gestion/sessions?`;
-                    if (filterSClasse)  url += `classe=${filterSClasse}&`;
-                    if (filterSMatiere) url += `matiere_id=${filterSMatiere}`;
-                    axios.get(url, authHeaders()).then(r => setSessions(r.data));
-                  }} color="rgba(99,102,241,0.2)"
+                  <Btn onClick={() => loadSessions(0)} color="rgba(99,102,241,0.2)"
                     style={{ border: "1px solid rgba(99,102,241,0.4)", color: "#a5b4fc", padding: "9px 16px", fontSize: 13 }}>
                     Filtrer
                   </Btn>
-                  <Btn onClick={loadSessions} color="rgba(255,255,255,0.06)"
+                  <Btn onClick={() => { setFilterSNiveau(""); setFilterSClasse(""); setFilterSMatiere(""); loadSessions(0); }}
+                    color="rgba(255,255,255,0.06)"
                     style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)", padding: "9px 14px", fontSize: 13 }}>
                     Réinitialiser
                   </Btn>
                 </div>
+
+                {/* ── Modal détail session ── */}
+                {sessionModal && (
+                  <div onClick={() => setSessionModal(null)} style={{
+                    position: "fixed", inset: 0, zIndex: 1000,
+                    background: "rgba(0,0,0,0.7)", display: "flex",
+                    alignItems: "center", justifyContent: "center", padding: 20,
+                  }}>
+                    <div onClick={e => e.stopPropagation()} style={{
+                      background: "#1e1e2e", borderRadius: 16, width: "100%", maxWidth: 560,
+                      maxHeight: "85vh", display: "flex", flexDirection: "column",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
+                    }}>
+                      {/* Header */}
+                      {sessionModal.loading ? (
+                        <div style={{ padding: 40, textAlign: "center", color: "rgba(255,255,255,0.4)" }}>
+                          Chargement…
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ padding: "18px 22px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: 16 }}>
+                                  {sessionModal.session?.matiere}
+                                </div>
+                                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 3 }}>
+                                  {sessionModal.session?.niveau} · Groupe {sessionModal.session?.classe} ·{" "}
+                                  {sessionModal.session?.date} · {sessionModal.session?.heure_debut} → {sessionModal.session?.heure_fin}
+                                  {sessionModal.session?.salle ? ` · ${sessionModal.session.salle}` : ""}
+                                </div>
+                              </div>
+                              <button onClick={() => setSessionModal(null)} style={{
+                                background: "none", border: "none", color: "rgba(255,255,255,0.4)",
+                                fontSize: 20, cursor: "pointer", lineHeight: 1,
+                              }}>✕</button>
+                            </div>
+                            {/* Stats résumé */}
+                            {sessionModal.stats && (
+                              <div style={{ display: "flex", gap: 12, marginTop: 14 }}>
+                                {[
+                                  { label: "Présents", val: sessionModal.stats.presents, color: "#22c55e" },
+                                  { label: "Retards",  val: sessionModal.stats.retards,  color: "#f59e0b" },
+                                  { label: "Absents",  val: sessionModal.stats.absents,  color: "#ef4444" },
+                                  { label: "Total",    val: sessionModal.stats.total,     color: "#6366f1" },
+                                ].map(({ label, val, color }) => (
+                                  <div key={label} style={{
+                                    flex: 1, background: `${color}18`, borderRadius: 10,
+                                    padding: "10px 0", textAlign: "center",
+                                    border: `1px solid ${color}30`,
+                                  }}>
+                                    <div style={{ fontSize: 22, fontWeight: 700, color }}>{val}</div>
+                                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{label}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Liste étudiants */}
+                          <div style={{ overflowY: "auto", flex: 1, padding: "6px 0" }}>
+                            {(sessionModal.etudiants || []).map((etu, i) => {
+                              const statusColors = {
+                                present: { bg: "#22c55e20", text: "#22c55e", label: "Présent" },
+                                retard:  { bg: "#f59e0b20", text: "#f59e0b", label: "Retard"  },
+                                absent:  { bg: "#ef444420", text: "#ef4444", label: "Absent"  },
+                              };
+                              const sc = statusColors[etu.status] || statusColors.absent;
+                              return (
+                                <div key={i} style={{
+                                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                                  padding: "10px 22px",
+                                  borderBottom: "1px solid rgba(255,255,255,0.04)",
+                                }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                    <div style={{
+                                      width: 34, height: 34, borderRadius: "50%",
+                                      background: `${sc.text}20`, display: "flex",
+                                      alignItems: "center", justifyContent: "center",
+                                      fontSize: 13, fontWeight: 700, color: sc.text,
+                                    }}>
+                                      {etu.prenom[0]}{etu.nom[0]}
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: 13, fontWeight: 500 }}>
+                                        {etu.prenom} {etu.nom}
+                                      </div>
+                                      {etu.detected_at && (
+                                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                                          Détecté à {etu.detected_at}
+                                          {etu.confidence ? ` · ${etu.confidence}%` : ""}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <span style={{
+                                    background: sc.bg, color: sc.text,
+                                    padding: "3px 10px", borderRadius: 20,
+                                    fontSize: 11, fontWeight: 600,
+                                  }}>{sc.label}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <Card>
                   <SectionTitle title={`Séances (${sessions.length})`} icon="🎬" />
@@ -2531,7 +2676,9 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                                     </div>
                                   ) : <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>—</span>}
                                 </td>
-                                <td style={{ padding: "9px 10px" }}>
+                                <td style={{ padding: "9px 10px", display: "flex", gap: 6 }}>
+                                  <Btn onClick={() => openSessionModal(s.id)}
+                                    style={{ padding: "4px 9px", fontSize: 11 }}>Détail</Btn>
                                   <Btn onClick={() => deleteSession(s.id)} color="#ef4444"
                                     style={{ padding: "4px 9px", fontSize: 11 }}>Supprimer</Btn>
                                 </td>
@@ -2540,6 +2687,15 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                           })}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+                  {sessions.length > 0 && sessions.length % SESSION_LIMIT === 0 && (
+                    <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
+                      <Btn onClick={() => loadSessions(sessionOffset + SESSION_LIMIT)}
+                        color="rgba(99,102,241,0.15)"
+                        style={{ border: "1px solid rgba(99,102,241,0.3)", color: "#a5b4fc", fontSize: 13, padding: "8px 24px" }}>
+                        Charger plus ({sessions.length} affichées)
+                      </Btn>
                     </div>
                   )}
                 </Card>
