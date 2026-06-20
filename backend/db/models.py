@@ -146,6 +146,19 @@ class Matiere(Base):
     grades        = relationship("Grade",       back_populates="matiere", cascade="all, delete")
 
 
+class Salle(Base):
+    """Salle de classe avec URL caméra de surveillance."""
+    __tablename__ = "salles"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nom        = Column(String(80), nullable=False, unique=True)   # ex: "Salle 101"
+    numero     = Column(String(20), nullable=True)                 # ex: "101"
+    batiment   = Column(String(60), nullable=True)
+    capacite   = Column(Integer, nullable=True)
+    camera_url = Column(String, nullable=True)                     # RTSP / HTTP
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class EmploiTemps(Base):
     """Planning hebdomadaire par classe."""
     __tablename__ = "emplois_temps"

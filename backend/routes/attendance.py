@@ -338,6 +338,99 @@ async def analyze_video(
     }
 
 
+@router.post("/analyze-stream")
+async def analyze_stream(
+    session_id: str  = Form(...),
+    stream_url: str  = Form(...),
+    db: Session      = Depends(get_db),
+    _user            = Depends(admin_or_prof),
+):
+    """
+    Analyse un flux vidéo via URL (RTSP, HTTP, fichier réseau).
+    Simule la connexion à une caméra de surveillance en temps réel.
+    cv2.VideoCapture accepte rtsp://, http://, et les URLs de fichiers distants.
+    """
+    try:
+        sid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(400, "session_id invalide (UUID attendu).")
+
+    session = crud.get_session_by_id(db, sid)
+    if not session:
+        raise HTTPException(404, f"Séance {session_id} introuvable.")
+
+    def _process_stream() -> dict:
+        cap = cv2.VideoCapture(stream_url)
+        if not cap.isOpened():
+            raise ValueError(f"Impossible d'ouvrir le flux : {stream_url}")
+
+        seen: set[str]          = set()
+        present_data: dict[str, dict] = {}
+        frame_idx               = 0
+        sampled                 = 0
+
+        try:
+            while sampled < MAX_SAMPLED_FRAMES:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frame_idx += 1
+                if frame_idx % FRAME_SAMPLE_RATE != 0:
+                    continue
+                sampled += 1
+                recognized = _process_frame(frame, db, seen)
+                for r in recognized:
+                    sid_str = r["student_id"]
+                    if sid_str not in seen:
+                        seen.add(sid_str)
+                        present_data[sid_str] = r
+        finally:
+            cap.release()
+
+        return {"total_frames": frame_idx, "sampled_frames": sampled, "present_data": present_data}
+
+    try:
+        result = await run_in_threadpool(_process_stream)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    presences_marquees = []
+    for sid_str, r in result["present_data"].items():
+        crud.mark_attendance(db, sid, uuid.UUID(sid_str), "present", confidence=r["similarity"])
+        presences_marquees.append({
+            "student_id": sid_str,
+            "nom":        r["nom"],
+            "prenom":     r["prenom"],
+            "similarity": round(r["similarity"], 3),
+        })
+
+    roster      = crud.get_session_roster(db, sid)
+    present_ids = set(result["present_data"].keys())
+    absents_marques = []
+    for s in roster:
+        if str(s.id) not in present_ids:
+            crud.mark_attendance(db, sid, s.id, "absent")
+            absents_marques.append({"student_id": str(s.id), "nom": s.nom, "prenom": s.prenom})
+
+    logger.info(
+        "analyze-stream séance=%s url=%s frames=%d/%d présents=%d absents=%d",
+        session_id, stream_url, result["sampled_frames"], result["total_frames"],
+        len(presences_marquees), len(absents_marques),
+    )
+
+    return {
+        "success":          True,
+        "session_id":       session_id,
+        "stream_url":       stream_url,
+        "total_frames":     result["total_frames"],
+        "sampled_frames":   result["sampled_frames"],
+        "students_present": len(presences_marquees),
+        "students_absent":  len(absents_marques),
+        "presences":        presences_marquees,
+        "absences":         absents_marques,
+    }
+
+
 @router.get("/mes-sessions")
 def mes_sessions(
     db: Session = Depends(get_db),

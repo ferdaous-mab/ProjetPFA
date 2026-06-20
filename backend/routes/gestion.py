@@ -13,7 +13,7 @@ from db.crud import (
     create_emploi_temps,
     get_all_students, delete_student,
 )
-from db.models import User, Matiere, EmploiTemps, StudentImage, Attendance, Grade, Student, Alert
+from db.models import User, Matiere, EmploiTemps, StudentImage, Attendance, Grade, Student, Alert, Salle
 from datetime import time
 
 router = APIRouter()
@@ -57,6 +57,73 @@ class EmploiCreate(BaseModel):
     heure_debut: str   # "08:30"
     heure_fin:   str   # "10:30"
     salle:       Optional[str] = None
+
+
+# ── SALLES ────────────────────────────────────────────────────────────────────
+
+class SalleCreate(BaseModel):
+    nom:        str
+    numero:     Optional[str] = None
+    batiment:   Optional[str] = None
+    capacite:   Optional[int] = None
+    camera_url: Optional[str] = None
+
+class SalleUpdate(BaseModel):
+    nom:        Optional[str] = None
+    numero:     Optional[str] = None
+    batiment:   Optional[str] = None
+    capacite:   Optional[int] = None
+    camera_url: Optional[str] = None
+
+
+@router.get("/gestion/salles")
+def list_salles(db: Session = Depends(get_db), _=Depends(admin_only)):
+    salles = db.query(Salle).order_by(Salle.nom).all()
+    return [
+        {
+            "id":         str(s.id),
+            "nom":        s.nom,
+            "numero":     s.numero,
+            "batiment":   s.batiment,
+            "capacite":   s.capacite,
+            "camera_url": s.camera_url,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in salles
+    ]
+
+
+@router.post("/gestion/salles")
+def create_salle(data: SalleCreate, db: Session = Depends(get_db), _=Depends(admin_only)):
+    existing = db.query(Salle).filter(Salle.nom == data.nom).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Une salle avec ce nom existe déjà")
+    salle = Salle(**data.dict())
+    db.add(salle)
+    db.commit()
+    db.refresh(salle)
+    return {"success": True, "id": str(salle.id)}
+
+
+@router.put("/gestion/salles/{salle_id}")
+def update_salle(salle_id: str, data: SalleUpdate, db: Session = Depends(get_db), _=Depends(admin_only)):
+    salle = db.query(Salle).filter(Salle.id == salle_id).first()
+    if not salle:
+        raise HTTPException(status_code=404, detail="Salle introuvable")
+    for field, value in data.dict(exclude_none=True).items():
+        setattr(salle, field, value)
+    db.commit()
+    return {"success": True}
+
+
+@router.delete("/gestion/salles/{salle_id}")
+def delete_salle(salle_id: str, db: Session = Depends(get_db), _=Depends(admin_only)):
+    salle = db.query(Salle).filter(Salle.id == salle_id).first()
+    if not salle:
+        raise HTTPException(status_code=404, detail="Salle introuvable")
+    db.delete(salle)
+    db.commit()
+    return {"success": True}
 
 
 # ── PROFESSEURS ───────────────────────────────────────────────────────────────

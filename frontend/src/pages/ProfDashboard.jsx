@@ -66,6 +66,7 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
   const [presLoading,      setPresLoading]      = useState(false);
   const [toggleLoading,    setToggleLoading]    = useState({});
 
+
   const PROF_SUGGESTIONS = [
     "Taux de présence ?",
     "Mes matières ?",
