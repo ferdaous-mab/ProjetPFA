@@ -60,16 +60,17 @@ p { margin: 0; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
-  height: 56px;
-  min-height: 56px;
-  background: #080812;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 0 24px;
+  height: 64px;
+  min-height: 64px;
+  background: #0d0d1f;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
   position: sticky;
   top: 0;
   z-index: 100;
   width: 100%;
   gap: 16px;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .header-actions {
@@ -102,12 +103,11 @@ p { margin: 0; }
 
 /* ── Page Body ────────────────────────────────────────────────── */
 .page-body {
-  padding: 28px 28px 60px;
+  padding: 24px 28px 80px;
   box-sizing: border-box;
   width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
   text-align: left;
+  min-height: 100vh;
 }
 
 /* ── Cards ────────────────────────────────────────────────────── */

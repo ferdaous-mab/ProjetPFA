@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import {
@@ -51,17 +51,51 @@ function EmptyState({ message }) {
   );
 }
 
-function StatCard({ icon, label, value, sub, color }) {
+function StatCard({ icon, label, value, sub, color, onClick }) {
   return (
-    <div className="sc-card" style={{
-      background: "rgba(255,255,255,0.03)",
-      border: "1px solid rgba(255,255,255,0.07)",
-      borderLeft: `3px solid ${color}`,
-      borderRadius: 12, padding: "18px 20px",
-    }}>
-      <div style={{ fontSize: 26, fontWeight: 700, color: "#f1f5f9", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{value}</div>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color, marginTop: 4, fontWeight: 600 }}>{sub}</div>}
+    <div
+      onClick={onClick}
+      style={{
+        background: "rgba(255,255,255,0.03)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: 14, padding: "18px 18px 16px",
+        position: "relative", overflow: "hidden",
+        cursor: onClick ? "pointer" : "default",
+        transition: "border-color .2s, transform .18s, box-shadow .2s",
+      }}
+      onMouseEnter={e => {
+        if (!onClick) return;
+        e.currentTarget.style.borderColor = `${color}55`;
+        e.currentTarget.style.transform = "translateY(-3px)";
+        e.currentTarget.style.boxShadow = `0 10px 32px ${color}22`;
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
+        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.boxShadow = "none";
+      }}
+    >
+      {/* Glow de fond */}
+      <div style={{ position: "absolute", top: -12, right: -12, width: 72, height: 72, borderRadius: "50%", background: `${color}20`, filter: "blur(18px)", pointerEvents: "none" }} />
+
+      {/* Ligne haute : icône + valeur */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{
+          width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+          background: `${color}18`, border: `1px solid ${color}35`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color, boxShadow: `0 0 0 4px ${color}0a`,
+        }}>{icon}</div>
+        <div style={{ fontSize: 30, fontWeight: 800, color: "#f1f5f9", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      </div>
+
+      <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.38)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+      {sub && <div style={{ fontSize: 11.5, color, marginTop: 5, fontWeight: 700 }}>{sub}</div>}
+
+      {/* Flèche indicateur si cliquable */}
+      {onClick && (
+        <div style={{ position: "absolute", bottom: 10, right: 12, fontSize: 10, color: `${color}80`, fontWeight: 700 }}>→</div>
+      )}
     </div>
   );
 }
@@ -166,6 +200,8 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   const [gEstClasse,     setGEstClasse]     = useState("");
   const [gMatNiveau,     setGMatNiveau]     = useState("");
   const [gMatGroupe,     setGMatGroupe]     = useState("");
+  const [showAddProf,    setShowAddProf]    = useState(false);
+  const [showAddMat,     setShowAddMat]     = useState(false);
   const [gEmploiNiveau,  setGEmploiNiveau]  = useState("");
   const [gEmploiGroupe,  setGEmploiGroupe]  = useState("");
 
@@ -205,6 +241,10 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   const [survFormNiveau,     setSurvFormNiveau]     = useState("");
   const [survFormClasse,     setSurvFormClasse]     = useState("");
   const [survFormSessionId,  setSurvFormSessionId]  = useState("");
+  const [survCreateForm,     setSurvCreateForm]     = useState({ matiere_id:"", date:"", heure_debut:"08:00", heure_fin:"10:00", salle:"" });
+  const [survCreateOpen,     setSurvCreateOpen]     = useState(false);
+  const [survCreateLoading,  setSurvCreateLoading]  = useState(false);
+  const [survCreateMsg,      setSurvCreateMsg]      = useState("");
 
   // ── Présences page ──────────────────────────────────────────────────────
   const [presFilter,         setPresFilter]         = useState({ niveau: "", classe: "" });
@@ -803,14 +843,14 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   ], "notes.csv");
 
   const tabs = [
-    { id: "overview",     label: "Tableau de bord" },
-    { id: "surveillance", label: "Surveillance"     },
-    { id: "presences",    label: "Présences"        },
-    { id: "risques",      label: "Risques"          },
-    { id: "prediction",   label: "Prédiction IA"    },
-    { id: "notes",        label: "Notes"            },
-    { id: "alertes",      label: "Alertes"          },
-    { id: "gestion",      label: "Gestion"          },
+    { id: "overview",     label: "Accueil"           },
+    { id: "gestion",      label: "Gestion"           },
+    { id: "presences",    label: "Présences"         },
+    { id: "alertes",      label: "Alertes"           },
+    { id: "risques",      label: "Étudiants à risque"},
+    { id: "notes",        label: "Notes"             },
+    { id: "surveillance", label: "Surveillance"      },
+    { id: "prediction",   label: "Prédiction IA"     },
   ];
 
   const gTabs = [
@@ -847,10 +887,34 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   const severityColor = s =>
     s === "high" ? "#ef4444" : s === "medium" ? "#f59e0b" : "#6366f1";
 
+  // ── Icônes SVG pour la sidebar ─────────────────────────────────
+  const ICON = ({ d, d2, circle, rect, poly, size = 18 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      {d  && <path d={d} />}
+      {d2 && <path d={d2} />}
+      {circle && <circle cx={circle[0]} cy={circle[1]} r={circle[2]} />}
+      {rect && <rect x={rect[0]} y={rect[1]} width={rect[2]} height={rect[3]} rx={rect[4]||0} />}
+      {poly && <polyline points={poly} />}
+    </svg>
+  );
+
+  const TAB_CONFIG = {
+    overview:     { color: "#3b82f6", icon: <ICON d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" d2="M9 22V12h6v10" /> },
+    surveillance: { color: "#a855f7", icon: <ICON d="M23 7l-7 5 7 5V7z" rect={[1,5,15,14,2]} /> },
+    presences:    { color: "#10b981", icon: <ICON d="M22 11.08V12a10 10 0 1 1-5.93-9.14" poly="22 4 12 14.01 9 11.01" /> },
+    risques:      { color: "#ef4444", icon: <ICON d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" d2="M12 9v4M12 17h.01" /> },
+    prediction:   { color: "#f59e0b", icon: <ICON d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3M6.343 6.343l-.707-.707M6.343 17.657l-.707.707M15.657 6.343l.707-.707m0 11.314l.707.707" circle={[12,12,4]} /> },
+    notes:        { color: "#6366f1", icon: <ICON d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" d2="M14 2v6h6M16 13H8M16 17H8M10 9H8" /> },
+    alertes:      { color: "#f97316", icon: <ICON d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" /> },
+    gestion:      { color: "#6b7280", icon: <ICON d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" d2="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /> },
+  };
+
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#070711",
+      display: "flex",
+      background: "#0d0d1f",
       fontFamily: F, color: "#f1f5f9",
     }}>
 
@@ -1125,87 +1189,200 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
         />
       )}
 
-      {/* Header */}
-      <div className="app-header">
-        {/* Logo + Titre */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-            background: "#6366f1",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 12, fontWeight: 800, color: "#fff", letterSpacing: "-0.3px", fontFamily: F,
-          }}>SC</div>
+      {/* Bouton flottant Assistant IA — centré en bas */}
+      <div style={{
+        position: "fixed",
+        bottom: 32,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 150,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 8,
+      }}>
+        <button
+          onClick={() => setShowVoice(true)}
+          style={{
+            width: 56, height: 56,
+            borderRadius: "50%",
+            background: "linear-gradient(135deg, #6366f1, #a855f7)",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 0 0 4px rgba(99,102,241,0.15), 0 8px 24px rgba(99,102,241,0.4)",
+            transition: "transform 0.2s ease, box-shadow 0.2s ease",
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.transform = "scale(1.1)";
+            e.currentTarget.style.boxShadow = "0 0 0 6px rgba(99,102,241,0.2), 0 12px 32px rgba(99,102,241,0.5)";
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.transform = "scale(1)";
+            e.currentTarget.style.boxShadow = "0 0 0 4px rgba(99,102,241,0.15), 0 8px 24px rgba(99,102,241,0.4)";
+          }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+        <div style={{
+          fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.4)",
+          letterSpacing: "0.06em", textTransform: "uppercase",
+          background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
+          padding: "3px 10px", borderRadius: 20,
+          border: "1px solid rgba(255,255,255,0.06)",
+        }}>
+          Assistant IA
+        </div>
+      </div>
+
+      {/* ═══ SIDEBAR GAUCHE ═══════════════════════════════════════ */}
+      <div style={{
+        width: 248, minWidth: 248, height: "100vh",
+        position: "sticky", top: 0,
+        background: "#111127",
+        borderRight: "1px solid rgba(255,255,255,0.07)",
+        display: "flex", flexDirection: "column",
+        overflowY: "auto", overflowX: "hidden",
+        zIndex: 100, scrollbarWidth: "none",
+      }}>
+        {/* ── Logo ── */}
+        <div style={{ padding: "22px 20px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flexShrink: 0, filter: "drop-shadow(0 4px 12px rgba(99,102,241,0.5))", position: "relative", width: 46, height: 46 }}>
+            <svg width="46" height="46" viewBox="0 0 46 46" fill="none">
+              <defs>
+                <linearGradient id="hexGradAdmin" x1="0" y1="0" x2="46" y2="46" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#1e1b4b"/>
+                  <stop offset="100%" stopColor="#3730a3"/>
+                </linearGradient>
+              </defs>
+              <polygon points="23,2 42,12.5 42,33.5 23,44 4,33.5 4,12.5" fill="url(#hexGradAdmin)"/>
+              <polygon points="23,6 38,14.8 38,31.2 23,40 8,31.2 8,14.8" fill="none" stroke="rgba(167,139,250,0.35)" strokeWidth="1.2"/>
+            </svg>
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontSize: 13, fontWeight: 900, color: "#fff", letterSpacing: "-0.5px", fontFamily: "sans-serif" }}>SC</span>
+            </div>
+          </div>
           <div>
             <div style={{ fontWeight: 700, fontSize: 14, color: "#f1f5f9", lineHeight: 1 }}>SmartCampus</div>
-            <div className="hide-mobile" style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 2, fontWeight: 500, letterSpacing: "0.04em" }}>Administration</div>
+            <div style={{ fontSize: 10, color: "#a855f7", marginTop: 3, fontWeight: 600,
+              letterSpacing: "0.06em", textTransform: "uppercase" }}>Administration</div>
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="header-actions">
-          {overview?.alertes_non_lues > 0 && (
-            <div onClick={() => setActiveTab("alertes")} style={{
+        {/* ── Séparateur ── */}
+        <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "0 16px 8px" }} />
+
+        {/* ── Séparateur ── */}
+        <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "8px 16px 12px" }} />
+
+        {/* Badge alertes */}
+        {overview?.alertes_non_lues > 0 && (
+          <div onClick={() => setActiveTab("alertes")}
+            style={{ margin: "0 12px 10px", padding: "8px 12px", borderRadius: 8,
               background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)",
-              color: "#f87171", fontSize: 11, fontWeight: 600,
-              padding: "4px 10px", borderRadius: 6, cursor: "pointer",
-            }}>
-              {overview.alertes_non_lues} alerte{overview.alertes_non_lues > 1 ? "s" : ""}
-            </div>
-          )}
-          <button onClick={() => setShowVoice(true)} className="sc-btn" style={{
-            background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.2)",
-            borderRadius: 7, color: "#a5b4fc", cursor: "pointer",
-            padding: "6px 12px", fontFamily: F, fontSize: 12, fontWeight: 600,
-          }}>Assistant IA</button>
-          <button onClick={onOpenMessages} className="sc-btn" style={{
-            position: "relative", background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 7, color: "rgba(255,255,255,0.6)", cursor: "pointer",
-            padding: "6px 12px", fontFamily: F, fontSize: 12, fontWeight: 500,
+              cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: "#f87171", fontWeight: 600 }}>
+              {overview.alertes_non_lues} alerte{overview.alertes_non_lues > 1 ? "s" : ""} non lue{overview.alertes_non_lues > 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+
+        {/* ── Navigation ── */}
+        <nav style={{ flex: 1, padding: "0 10px", overflowY: "auto", scrollbarWidth: "none" }}>
+          {tabs.map(tab => {
+            const cfg = TAB_CONFIG[tab.id] || { color: "#6b7280", icon: null };
+            const active = activeTab === tab.id;
+            return (
+              <button key={tab.id} className="tab-btn" onClick={() => setActiveTab(tab.id)} style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 12,
+                padding: "10px 12px", borderRadius: 10, border: "none",
+                background: active ? `${cfg.color}18` : "transparent",
+                outline: active ? `1px solid ${cfg.color}35` : "none",
+                color: active ? "#fff" : "rgba(255,255,255,0.48)",
+                cursor: "pointer", fontFamily: F, fontSize: 13,
+                fontWeight: active ? 600 : 400,
+                marginBottom: 3, textAlign: "left",
+                transition: "all 0.14s",
+              }}
+                onMouseEnter={e => { if (!active) { e.currentTarget.style.background = `${cfg.color}10`; e.currentTarget.style.color = "#fff"; }}}
+                onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.48)"; }}}
+              >
+                {/* Icône colorée */}
+                <div style={{
+                  width: 34, height: 34, borderRadius: 9, flexShrink: 0,
+                  background: active ? `${cfg.color}28` : `${cfg.color}12`,
+                  border: active ? `1px solid ${cfg.color}40` : `1px solid ${cfg.color}20`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: active ? cfg.color : `${cfg.color}bb`,
+                  transition: "all 0.14s",
+                }}>
+                  {cfg.icon}
+                </div>
+                {tab.label}
+                {active && (
+                  <div style={{ marginLeft: "auto", width: 6, height: 6,
+                    borderRadius: "50%", background: cfg.color, flexShrink: 0,
+                    boxShadow: `0 0 6px ${cfg.color}` }} />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* ── Messages + Déconnexion ── */}
+        <div style={{ padding: "10px 10px 20px" }}>
+          {/* Messages */}
+          <button onClick={onOpenMessages} className="tab-btn" style={{
+            width: "100%", display: "flex", alignItems: "center", gap: 12,
+            padding: "11px 12px", borderRadius: 10, border: "none",
+            background: "transparent", color: "rgba(255,255,255,0.4)",
+            cursor: "pointer", fontFamily: F, fontSize: 13, marginBottom: 6,
           }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9,
+              background: "rgba(14,165,233,0.1)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#0ea5e9", position: "relative", flexShrink: 0 }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+              {unreadMsg > 0 && (
+                <span style={{ position: "absolute", top: -4, right: -4,
+                  background: "#ef4444", color: "#fff", fontSize: 8, fontWeight: 700,
+                  minWidth: 14, height: 14, borderRadius: 7,
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {unreadMsg}
+                </span>
+              )}
+            </div>
             Messages
-            {unreadMsg > 0 && (
-              <span style={{
-                position: "absolute", top: -5, right: -5,
-                background: "#ef4444", color: "#fff", fontSize: 9, fontWeight: 700,
-                minWidth: 16, height: 16, borderRadius: 8,
-                display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
-              }}>{unreadMsg}</span>
-            )}
           </button>
-          <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.08)" }} />
-          <span className="header-username">{user?.prenom} {user?.nom}</span>
+
+          {/* Déconnexion */}
           <button onClick={onLogout} className="sc-btn" style={{
-            background: "transparent", border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 7, color: "rgba(255,255,255,0.4)", cursor: "pointer",
-            padding: "6px 12px", fontFamily: F, fontSize: 12,
-          }}>Déconnexion</button>
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            padding: "12px", borderRadius: 10, border: "1px solid rgba(239,68,68,0.25)",
+            background: "rgba(239,68,68,0.1)", color: "#f87171",
+            cursor: "pointer", fontFamily: F, fontSize: 13, fontWeight: 600,
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+            </svg>
+            Déconnexion
+          </button>
         </div>
       </div>
 
-      {/* Navigation principale */}
-      <div style={{
-        display: "flex", overflowX: "auto",
-        borderBottom: "1px solid rgba(255,255,255,0.06)",
-        background: "#080812",
-        position: "sticky", top: 56, zIndex: 90,
-        padding: "0 28px", scrollbarWidth: "none",
-      }}>
-        {tabs.map(tab => (
-          <button key={tab.id} className="tab-btn" onClick={() => setActiveTab(tab.id)} style={{
-            padding: "0 16px", height: 44,
-            background: "transparent", border: "none",
-            borderBottom: activeTab === tab.id ? "2px solid #6366f1" : "2px solid transparent",
-            color: activeTab === tab.id ? "#e0e7ff" : "rgba(255,255,255,0.35)",
-            fontSize: 12, fontWeight: activeTab === tab.id ? 600 : 400,
-            cursor: "pointer", whiteSpace: "nowrap", fontFamily: F,
-            letterSpacing: "0.01em", flexShrink: 0,
-          }}>
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
+      {/* ═══ CONTENU PRINCIPAL ══════════════════════════════════════ */}
+      <div style={{ flex: 1, minHeight: "100vh", overflowY: "auto", overflowX: "hidden" }}>
       <div className="page-body">
         {/* Tableau de bord */}
         {activeTab === "overview" && (
@@ -1244,19 +1421,29 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
             </div>
 
             {/* KPIs toujours visibles */}
-            <div style={{ display: "grid", gridTemplateColumns: bp.colsAuto, gap: bp.gap2 }}>
-              <StatCard icon="🎓" label="Étudiants" color="#6366f1"
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: bp.gap2 }}>
+              <StatCard color="#6366f1" label="Étudiants"
                 value={overview?.total_etudiants || 0}
-                sub={`${overview?.enrolles || 0} enrôlés`} />
-              <StatCard icon="👨‍🏫" label="Professeurs" color="#a855f7"
-                value={overview?.total_profs || 0} />
-              <StatCard icon="✅" label="Taux présence" color="#22c55e"
-                value={`${overview?.taux_presence_global || 0}%`} />
-              <StatCard icon="📚" label="Matières" color="#0ea5e9"
+                sub={`${overview?.enrolles || 0} enrôlés`}
+                onClick={() => { setActiveTab("gestion"); setGTab("etudiants"); }}
+                icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>} />
+              <StatCard color="#a855f7" label="Professeurs"
+                value={overview?.total_profs || 0}
+                onClick={() => { setActiveTab("gestion"); setGTab("profs"); }}
+                icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>} />
+              <StatCard color="#22c55e" label="Taux présence"
+                value={`${overview?.taux_presence_global || 0}%`}
+                onClick={() => setActiveTab("presences")}
+                icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>} />
+              <StatCard color="#0ea5e9" label="Matières"
                 value={overview?.total_matieres || 0}
-                sub={`${overview?.total_sessions || 0} séances`} />
-              <StatCard icon="🔔" label="Alertes" color="#ef4444"
-                value={overview?.alertes_non_lues || 0} sub="non lues" />
+                sub={`${overview?.total_sessions || 0} séances`}
+                onClick={() => { setActiveTab("gestion"); setGTab("matieres"); }}
+                icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>} />
+              <StatCard color="#ef4444" label="Alertes"
+                value={overview?.alertes_non_lues || 0} sub="non lues"
+                onClick={() => setActiveTab("alertes")}
+                icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>} />
             </div>
 
             {/* Filtre */}
@@ -1994,231 +2181,300 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
               </div>
             </Card>
 
-            {/* ── Pas de filtre ── */}
-            {!notesPageFiltre.classe ? (
-              <div style={{ textAlign: "center", padding: "48px 20px", color: "rgba(255,255,255,0.25)" }}>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>📝</div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>
-                  Sélectionnez un niveau et un groupe
-                </div>
-                <div style={{ fontSize: 13 }}>pour afficher les notes des étudiants</div>
-              </div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: notesPageStudent ? "1fr 1.4fr" : "1fr", gap: 16 }}>
+            {/* ── Modal notes étudiant ── */}
+            {notesPageStudent && (
+              <div onClick={() => { setNotesPageStudent(null); setEditNote(null); setNoteMsg(""); }}
+                style={{ position: "fixed", inset: 0, zIndex: 300,
+                  background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)",
+                  display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+                <div onClick={e => e.stopPropagation()}
+                  style={{ background: "#0d0d1a", border: "1px solid rgba(255,255,255,0.09)",
+                    borderRadius: 16, width: "100%", maxWidth: 680,
+                    maxHeight: "90vh", display: "flex", flexDirection: "column",
+                    boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }}>
 
-                {/* ── Liste étudiants ── */}
-                <Card>
-                  <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-                    <SectionTitle title={`${notesPageFiltre.niveau} — Groupe ${notesPageFiltre.classe} (${notesEtudiants.length})`} icon="🎓" />
-                    <Btn onClick={exportNotes} color="rgba(34,197,94,0.2)"
-                      style={{ marginLeft: "auto", border: "1px solid rgba(34,197,94,0.4)", color: "#22c55e", padding: "5px 10px", fontSize: 11 }}>
-                      ⬇ CSV
-                    </Btn>
-                  </div>
-                  {notesEtudiants.length === 0 ? (
-                    <EmptyState message="Aucun étudiant dans ce groupe" />
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {notesEtudiants.map(s => {
-                        const avg = avgOf(s.id);
-                        const isSelected = notesPageStudent?.id === s.id;
-                        const avgColor = avg === null ? "rgba(255,255,255,0.3)"
-                          : parseFloat(avg) >= 14 ? "#22c55e"
-                          : parseFloat(avg) >= 10 ? "#f59e0b" : "#ef4444";
-                        return (
-                          <div key={s.id} onClick={() => setNotesPageStudent(isSelected ? null : s)}
-                            style={{
-                              display: "flex", alignItems: "center", gap: 12,
-                              padding: "11px 14px", borderRadius: 10, cursor: "pointer",
-                              background: isSelected ? "rgba(99,102,241,0.12)" : "rgba(255,255,255,0.02)",
-                              border: isSelected ? "1px solid rgba(99,102,241,0.4)" : "1px solid rgba(255,255,255,0.06)",
-                              transition: "all 0.15s",
-                            }}>
-                            <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
-                              background: "rgba(99,102,241,0.15)", display: "flex",
-                              alignItems: "center", justifyContent: "center",
-                              fontWeight: 700, fontSize: 13, color: "#a5b4fc" }}>
-                              {s.prenom[0]}{s.nom[0]}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, fontSize: 13 }}>{s.prenom} {s.nom}</div>
-                              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>
-                                {(avgMap[String(s.id)]?.cnt || 0)} note{(avgMap[String(s.id)]?.cnt || 0) > 1 ? "s" : ""} saisie{(avgMap[String(s.id)]?.cnt || 0) > 1 ? "s" : ""}
-                              </div>
-                            </div>
-                            <div style={{ textAlign: "right", flexShrink: 0 }}>
-                              {avg !== null ? (
-                                <div style={{ fontWeight: 700, fontSize: 17, color: avgColor }}>{avg}/20</div>
-                              ) : (
-                                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>Pas de notes</div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                  {/* En-tête modal */}
+                  <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+                    <div style={{ width: 42, height: 42, borderRadius: "50%", flexShrink: 0,
+                      background: "#6366f1", display: "flex", alignItems: "center",
+                      justifyContent: "center", fontWeight: 700, fontSize: 16, color: "#fff" }}>
+                      {notesPageStudent.prenom[0]}{notesPageStudent.nom[0]}
                     </div>
-                  )}
-                </Card>
-
-                {/* ── Notes de l'étudiant sélectionné ── */}
-                {notesPageStudent && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                    <Card>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-                        <div style={{ width: 40, height: 40, borderRadius: "50%",
-                          background: "rgba(99,102,241,0.15)", display: "flex",
-                          alignItems: "center", justifyContent: "center",
-                          fontWeight: 700, fontSize: 15, color: "#a5b4fc", flexShrink: 0 }}>
-                          {notesPageStudent.prenom[0]}{notesPageStudent.nom[0]}
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 700, fontSize: 15 }}>{notesPageStudent.prenom} {notesPageStudent.nom}</div>
-                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
-                            {notesPageFiltre.niveau} — Groupe {notesPageFiltre.classe}
-                          </div>
-                        </div>
-                        {avgOf(notesPageStudent.id) && (
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: 22, fontWeight: 700,
-                              color: parseFloat(avgOf(notesPageStudent.id)) >= 10 ? "#22c55e" : "#ef4444" }}>
-                              {avgOf(notesPageStudent.id)}/20
-                            </div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>moyenne</div>
-                          </div>
-                        )}
-                        <button onClick={() => setNotesPageStudent(null)}
-                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-                            borderRadius: 8, color: "rgba(255,255,255,0.4)", cursor: "pointer",
-                            width: 30, height: 30, fontSize: 14, flexShrink: 0 }}>✕</button>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 16, color: "#f1f5f9" }}>
+                        {notesPageStudent.prenom} {notesPageStudent.nom}
                       </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
+                        {notesPageFiltre.niveau} — Groupe {notesPageFiltre.classe}
+                      </div>
+                    </div>
+                    {avgOf(notesPageStudent.id) && (
+                      <div style={{ textAlign: "center", padding: "8px 16px",
+                        background: parseFloat(avgOf(notesPageStudent.id)) >= 10 ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)",
+                        border: `1px solid ${parseFloat(avgOf(notesPageStudent.id)) >= 10 ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)"}`,
+                        borderRadius: 10 }}>
+                        <div style={{ fontSize: 22, fontWeight: 700,
+                          color: parseFloat(avgOf(notesPageStudent.id)) >= 10 ? "#10b981" : "#ef4444" }}>
+                          {avgOf(notesPageStudent.id)}/20
+                        </div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 2,
+                          textTransform: "uppercase", letterSpacing: "0.05em" }}>Moyenne</div>
+                      </div>
+                    )}
+                    <button onClick={() => { setNotesPageStudent(null); setEditNote(null); setNoteMsg(""); }}
+                      style={{ width: 30, height: 30, borderRadius: 7, border: "1px solid rgba(255,255,255,0.08)",
+                        background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.4)",
+                        cursor: "pointer", fontSize: 14, flexShrink: 0, display: "flex",
+                        alignItems: "center", justifyContent: "center" }}>✕</button>
+                  </div>
 
-                      {/* Notes par matière */}
-                      {matieresPourClasse.length === 0 ? (
-                        <EmptyState message="Aucune matière pour ce niveau" />
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                          {matieresPourClasse.map(mat => {
+                  {/* Corps scrollable */}
+                  <div style={{ overflowY: "auto", padding: "16px 24px", flex: 1 }}>
+
+                    {/* Tableau des matières */}
+                    {matieresPourClasse.length === 0 ? (
+                      <EmptyState message="Aucune matière configurée pour ce niveau" />
+                    ) : (
+                      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 20 }}>
+                        <thead>
+                          <tr style={{ background: "rgba(255,255,255,0.02)" }}>
+                            {["Matière","Notes","Moyenne"].map(h => (
+                              <th key={h} style={{ padding: "9px 14px", textAlign: "left",
+                                fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.35)",
+                                textTransform: "uppercase", letterSpacing: "0.05em",
+                                borderBottom: "1px solid rgba(255,255,255,0.06)" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {matieresPourClasse.map((mat, idx) => {
                             const matNotes = notesByMat[mat.nom] || [];
                             const matAvg = matNotes.length > 0
                               ? (matNotes.reduce((s, n) => s + n.note, 0) / matNotes.length).toFixed(1)
                               : null;
+                            const avgColor = !matAvg ? "rgba(255,255,255,0.2)"
+                              : parseFloat(matAvg) >= 14 ? "#10b981"
+                              : parseFloat(matAvg) >= 10 ? "#f59e0b" : "#ef4444";
                             return (
-                              <div key={mat.id} style={{ padding: "12px 14px", borderRadius: 10,
-                                background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                                <div style={{ display: "flex", alignItems: "center", marginBottom: matNotes.length > 0 ? 8 : 0 }}>
-                                  <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{mat.nom}</div>
-                                  {matAvg ? (
-                                    <span style={{ fontWeight: 700, fontSize: 15,
-                                      color: parseFloat(matAvg) >= 10 ? "#22c55e" : "#ef4444" }}>
-                                      {matAvg}/20
+                              <tr key={mat.id} style={{
+                                borderBottom: idx < matieresPourClasse.length - 1
+                                  ? "1px solid rgba(255,255,255,0.04)" : "none",
+                              }}>
+                                {/* Matière */}
+                                <td style={{ padding: "12px 14px", fontWeight: 500, fontSize: 13, color: "#e2e8f0" }}>
+                                  {mat.nom}
+                                </td>
+
+                                {/* Notes */}
+                                <td style={{ padding: "12px 14px" }}>
+                                  {matNotes.length === 0 ? (
+                                    <span style={{ fontSize: 12, color: "rgba(255,255,255,0.18)", fontStyle: "italic" }}>
+                                      Aucune note
                                     </span>
                                   ) : (
-                                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>Pas encore de notes</span>
+                                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                                      {matNotes.map((n, i) => (
+                                        <div key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5,
+                                          background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
+                                          borderRadius: 6, padding: "3px 9px", fontSize: 12 }}>
+                                          <span style={{ fontWeight: 700,
+                                            color: n.note >= 10 ? "#10b981" : "#ef4444" }}>{n.note}</span>
+                                          <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 10 }}>/{20}</span>
+                                          <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10,
+                                            background: "rgba(255,255,255,0.04)", borderRadius: 4,
+                                            padding: "1px 5px" }}>{n.type}</span>
+                                          {n.date && (
+                                            <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 10 }}>
+                                              {n.date}
+                                            </span>
+                                          )}
+                                          <button onClick={() => setEditNote(n)}
+                                            style={{ background: "none", border: "none", color: "#6366f1",
+                                              cursor: "pointer", fontSize: 10, padding: "0 2px",
+                                              lineHeight: 1 }}>✎</button>
+                                          <button onClick={() => deleteNote(n.id)}
+                                            style={{ background: "none", border: "none", color: "rgba(239,68,68,0.6)",
+                                              cursor: "pointer", fontSize: 10, padding: "0 2px",
+                                              lineHeight: 1 }}>✕</button>
+                                        </div>
+                                      ))}
+                                    </div>
                                   )}
-                                </div>
-                                {matNotes.length > 0 && (
-                                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
-                                    {matNotes.map((n, i) => (
-                                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6,
-                                        background: "rgba(255,255,255,0.04)", borderRadius: 8,
-                                        padding: "4px 10px", fontSize: 12 }}>
-                                        <span style={{ fontWeight: 700,
-                                          color: n.note >= 10 ? "#22c55e" : "#ef4444" }}>{n.note}/20</span>
-                                        <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 11 }}>{n.type}</span>
-                                        {n.date && <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 10 }}>{n.date}</span>}
-                                        <button onClick={() => setEditNote(n)}
-                                          style={{ background: "none", border: "none", color: "#a5b4fc",
-                                            cursor: "pointer", fontSize: 11, padding: 0 }}>✎</button>
-                                        <button onClick={() => deleteNote(n.id)}
-                                          style={{ background: "none", border: "none", color: "#f87171",
-                                            cursor: "pointer", fontSize: 11, padding: 0 }}>✕</button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
+                                </td>
+
+                                {/* Moyenne matière */}
+                                <td style={{ padding: "12px 14px", textAlign: "right" }}>
+                                  <span style={{ fontWeight: 700, fontSize: 15, color: avgColor }}>
+                                    {matAvg ? `${matAvg}/20` : "—"}
+                                  </span>
+                                </td>
+                              </tr>
                             );
                           })}
-                        </div>
-                      )}
-                    </Card>
+                        </tbody>
+                      </table>
+                    )}
 
-                    {/* Formulaire ajout note pour cet étudiant */}
-                    <Card>
-                      <SectionTitle title={editNote ? "Modifier la note" : "Ajouter une note"} icon={editNote ? "✏️" : "➕"} />
+                    {/* Séparateur */}
+                    <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "4px 0 16px" }} />
+
+                    {/* Formulaire ajout / modification note */}
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.5)",
+                        textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>
+                        {editNote ? "Modifier la note" : "Ajouter une note"}
+                      </div>
                       {noteMsg && (
-                        <div style={{ marginBottom: 10, padding: "9px 14px", borderRadius: 8, fontSize: 13,
-                          background: noteMsg === "ok" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
-                          border: `1px solid ${noteMsg === "ok" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
-                          color: noteMsg === "ok" ? "#22c55e" : "#ef4444" }}>
-                          {noteMsg === "ok" ? "✅ Note enregistrée !" : noteMsg.replace("err:", "")}
+                        <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 7, fontSize: 12,
+                          background: noteMsg === "ok" ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)",
+                          border: `1px solid ${noteMsg === "ok" ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)"}`,
+                          color: noteMsg === "ok" ? "#10b981" : "#ef4444" }}>
+                          {noteMsg === "ok" ? "Note enregistrée avec succès" : noteMsg.replace("err:", "")}
                         </div>
                       )}
                       {editNote ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                          <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.08)", borderRadius: 8,
-                            fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
-                            {editNote.matiere}
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                            <Input placeholder="Note /20" type="number" value={editNote.note}
-                              onChange={e => setEditNote(n => ({...n, note: e.target.value}))} />
-                            <Select value={editNote.type} onChange={e => setEditNote(n => ({...n, type: e.target.value}))}>
-                              <option value="controle">Contrôle</option>
-                              <option value="examen">Examen</option>
-                              <option value="tp">TP</option>
-                            </Select>
-                            <Input placeholder="Commentaire" value={editNote.commentaire || ""}
-                              onChange={e => setEditNote(n => ({...n, commentaire: e.target.value}))} />
-                          </div>
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <Btn onClick={saveEditNote} style={{ flex: 1 }}>💾 Enregistrer</Btn>
-                            <Btn onClick={() => setEditNote(null)} color="rgba(255,255,255,0.06)"
-                              style={{ padding: "9px 18px", color: "rgba(255,255,255,0.5)" }}>Annuler</Btn>
-                          </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                          <div style={{ flex: 1, padding: "8px 12px", background: "rgba(99,102,241,0.07)",
+                            border: "1px solid rgba(99,102,241,0.15)", borderRadius: 7,
+                            fontSize: 12, color: "rgba(255,255,255,0.6)" }}>{editNote.matiere}</div>
+                          <Input placeholder="Note /20" type="number" value={editNote.note}
+                            onChange={e => setEditNote(n => ({...n, note: e.target.value}))}
+                            style={{ width: 100 }} />
+                          <Select value={editNote.type} onChange={e => setEditNote(n => ({...n, type: e.target.value}))}
+                            style={{ width: 120 }}>
+                            <option value="controle">Contrôle</option>
+                            <option value="examen">Examen</option>
+                            <option value="tp">TP</option>
+                          </Select>
+                          <Btn onClick={saveEditNote}>Enregistrer</Btn>
+                          <Btn onClick={() => setEditNote(null)} color="rgba(255,255,255,0.06)"
+                            style={{ color: "rgba(255,255,255,0.4)" }}>Annuler</Btn>
                         </div>
                       ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                           <Select value={formNote.matiere_id}
-                            onChange={e => setFormNote(f => ({...f, matiere_id: e.target.value}))}>
+                            onChange={e => setFormNote(f => ({...f, matiere_id: e.target.value}))}
+                            style={{ flex: 2, minWidth: 160 }}>
                             <option value="">-- Matière --</option>
                             {matieresPourClasse.map(m => (
                               <option key={m.id} value={m.id}>{m.nom}</option>
                             ))}
                           </Select>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                            <Input placeholder="Note /20" type="number" min="0" max="20" step="0.25"
-                              value={formNote.note}
-                              onChange={e => setFormNote(f => ({...f, note: e.target.value}))} />
-                            <Select value={formNote.type}
-                              onChange={e => setFormNote(f => ({...f, type: e.target.value}))}>
-                              <option value="controle">Contrôle</option>
-                              <option value="examen">Examen</option>
-                              <option value="tp">TP</option>
-                            </Select>
-                            <Input placeholder="Date" type="date" value={formNote.date}
-                              onChange={e => setFormNote(f => ({...f, date: e.target.value}))} />
-                          </div>
-                          <Btn onClick={async () => {
-                            if (!formNote.matiere_id || formNote.note === "") return;
-                            const payload = { ...formNote, student_id: String(notesPageStudent.id), note: parseFloat(formNote.note) };
-                            try {
-                              await axios.post(`${API_URL}/api/gestion/notes`, payload, authHeaders());
-                              setNoteMsg("ok");
-                              setFormNote({ student_id:"", matiere_id:"", note:"", type:"controle", commentaire:"", date:"" });
-                              loadNotes();
-                            } catch (e) { setNoteMsg("err:" + (e.response?.data?.detail || "Erreur")); }
-                            finally { setTimeout(() => setNoteMsg(""), 3000); }
-                          }}
-                            style={{ opacity: (!formNote.matiere_id || formNote.note === "") ? 0.5 : 1 }}>
-                            ➕ Ajouter la note
-                          </Btn>
+                          <Input placeholder="Note /20" type="number" min="0" max="20" step="0.25"
+                            value={formNote.note}
+                            onChange={e => setFormNote(f => ({...f, note: e.target.value}))}
+                            style={{ width: 100 }} />
+                          <Select value={formNote.type}
+                            onChange={e => setFormNote(f => ({...f, type: e.target.value}))}
+                            style={{ width: 110 }}>
+                            <option value="controle">Contrôle</option>
+                            <option value="examen">Examen</option>
+                            <option value="tp">TP</option>
+                          </Select>
+                          <Input placeholder="Date" type="date" value={formNote.date}
+                            onChange={e => setFormNote(f => ({...f, date: e.target.value}))}
+                            style={{ width: 130 }} />
+                          <Btn disabled={!formNote.matiere_id || formNote.note === ""}
+                            onClick={async () => {
+                              if (!formNote.matiere_id || formNote.note === "") return;
+                              const payload = { ...formNote, student_id: String(notesPageStudent.id), note: parseFloat(formNote.note) };
+                              try {
+                                await axios.post(`${API_URL}/api/gestion/notes`, payload, authHeaders());
+                                setNoteMsg("ok");
+                                setFormNote({ student_id:"", matiere_id:"", note:"", type:"controle", commentaire:"", date:"" });
+                                loadNotes();
+                              } catch (e) { setNoteMsg("err:" + (e.response?.data?.detail || "Erreur")); }
+                              finally { setTimeout(() => setNoteMsg(""), 3000); }
+                            }}>Ajouter</Btn>
                         </div>
                       )}
-                    </Card>
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
+            )}
+
+            {/* ── Pas de filtre ── */}
+            {!notesPageFiltre.classe ? (
+              <div style={{ textAlign: "center", padding: "60px 20px", color: "rgba(255,255,255,0.2)" }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>
+                  Sélectionnez un niveau et un groupe
+                </div>
+                <div style={{ fontSize: 12 }}>pour afficher la liste des étudiants</div>
+              </div>
+            ) : (
+              <Card>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
+                  <SectionTitle title={`${notesPageFiltre.niveau} — Groupe ${notesPageFiltre.classe} (${notesEtudiants.length})`} />
+                  <Btn onClick={exportNotes} color="rgba(16,185,129,0.15)"
+                    style={{ marginLeft: "auto", border: "1px solid rgba(16,185,129,0.25)", color: "#10b981",
+                      padding: "5px 12px", fontSize: 11 }}>
+                    Export CSV
+                  </Btn>
+                </div>
+                {notesEtudiants.length === 0 ? (
+                  <EmptyState message="Aucun étudiant dans ce groupe" />
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "rgba(255,255,255,0.02)" }}>
+                        {["Étudiant","Notes saisies","Moyenne",""].map((h, i) => (
+                          <th key={i} style={{ padding: "9px 14px", textAlign: i === 3 ? "right" : "left",
+                            fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.35)",
+                            textTransform: "uppercase", letterSpacing: "0.05em",
+                            borderBottom: "1px solid rgba(255,255,255,0.06)" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {notesEtudiants.map((s, idx) => {
+                        const avg = avgOf(s.id);
+                        const cnt = avgMap[String(s.id)]?.cnt || 0;
+                        const avgColor = avg === null ? "rgba(255,255,255,0.2)"
+                          : parseFloat(avg) >= 14 ? "#10b981"
+                          : parseFloat(avg) >= 10 ? "#f59e0b" : "#ef4444";
+                        return (
+                          <tr key={s.id} className="sc-tr" style={{
+                            borderBottom: idx < notesEtudiants.length - 1
+                              ? "1px solid rgba(255,255,255,0.04)" : "none",
+                          }}>
+                            <td style={{ padding: "12px 14px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                                  background: "rgba(99,102,241,0.15)",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  fontWeight: 600, fontSize: 12, color: "#a5b4fc" }}>
+                                  {s.prenom[0]}{s.nom[0]}
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 500, fontSize: 13, color: "#e2e8f0" }}>{s.prenom} {s.nom}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td style={{ padding: "12px 14px", fontSize: 13, color: "rgba(255,255,255,0.4)" }}>
+                              {cnt > 0 ? `${cnt} note${cnt > 1 ? "s" : ""}` : <span style={{ color: "rgba(255,255,255,0.18)", fontStyle: "italic" }}>Aucune</span>}
+                            </td>
+                            <td style={{ padding: "12px 14px" }}>
+                              <span style={{ fontWeight: 700, fontSize: 15, color: avgColor }}>
+                                {avg ? `${avg}/20` : "—"}
+                              </span>
+                            </td>
+                            <td style={{ padding: "12px 14px", textAlign: "right" }}>
+                              <button onClick={() => setNotesPageStudent(s)}
+                                style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid rgba(99,102,241,0.25)",
+                                  background: "rgba(99,102,241,0.08)", color: "#a5b4fc",
+                                  cursor: "pointer", fontSize: 12, fontFamily: F, fontWeight: 500 }}>
+                                Voir les notes
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
             )}
           </div>
           );
@@ -2856,25 +3112,37 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
               </div>
             </div>
 
-            {/* Deux options côte à côte */}
-            <div style={{ display: "grid", gridTemplateColumns: bp.cols2, gap: bp.gap }}>
 
-              {/* ── OPTION 1 : Vidéo (ACTIVE) ── */}
+            {/* ── Boutons toggle ── */}
+            <div style={{ display: "flex", gap: 10 }}>
+              {[
+                { key: "file", label: "Vidéo enregistrée", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg> },
+                { key: "url",  label: "URL Caméra",        icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
+              ].map(btn => {
+                const active = survAnalyzeMode === btn.key;
+                return (
+                  <button key={btn.key} onClick={() => setSurvAnalyzeMode(btn.key)} style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "10px 20px", borderRadius: 10, cursor: "pointer",
+                    border: active ? "1px solid rgba(99,102,241,0.5)" : "1px solid rgba(255,255,255,0.1)",
+                    background: active ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.03)",
+                    color: active ? "#a5b4fc" : "rgba(255,255,255,0.45)",
+                    fontFamily: F, fontSize: 13, fontWeight: active ? 700 : 500,
+                    transition: "all .15s",
+                  }}>
+                    {btn.icon} {btn.label}
+                    {active && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#6366f1", marginLeft: 4 }}/>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* ── Contenu selon le mode sélectionné ── */}
+            <div style={{ display: "grid", gridTemplateColumns: resVideo && survAnalyzeMode === "file" ? "1fr 1fr" : "1fr", gap: bp.gap }}>
+
+              {/* ── VIDÉO ── */}
+              {survAnalyzeMode === "file" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 16px", borderRadius: 10,
-                  background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)",
-                }}>
-                  <span style={{ fontSize: 18 }}>📁</span>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "#a5b4fc" }}>Option 1 — Vidéo enregistrée</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Active · Importez une vidéo et identifiez la séance</div>
-                  </div>
-                  <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700,
-                    background: "rgba(34,197,94,0.15)", color: "#22c55e",
-                    padding: "3px 10px", borderRadius: 20 }}>ACTIF</span>
-                </div>
 
                 {/* Étape 1 : Upload vidéo */}
                 <Card>
@@ -2968,6 +3236,125 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                           )}
                         </select>
                       )}
+
+                      {/* Bouton créer une séance si aucune trouvée */}
+                      {survFormClasse && !survLoading && sessionsFiltrees.length === 0 && (
+                        <div style={{ marginTop: 10 }}>
+                          <button
+                            onClick={() => { setSurvCreateOpen(o => !o); setSurvCreateMsg(""); }}
+                            style={{
+                              width: "100%", padding: "9px 14px",
+                              background: "rgba(99,102,241,0.12)",
+                              border: "1px solid rgba(99,102,241,0.35)",
+                              borderRadius: 9, color: "#a5b4fc",
+                              fontSize: 12, fontWeight: 600,
+                              fontFamily: F, cursor: "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                            }}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Créer une séance pour cette vidéo
+                          </button>
+
+                          {survCreateOpen && (() => {
+                            const matsFiltrees = matieres.filter(m =>
+                              (!survFormNiveau || m.annee_scolaire?.includes(survFormNiveau?.replace(/[^0-9]/g,""))) &&
+                              (!survFormClasse  || m.classe === survFormClasse)
+                            );
+                            return (
+                              <div style={{
+                                marginTop: 10, padding: "14px 14px",
+                                background: "rgba(99,102,241,0.07)",
+                                border: "1px solid rgba(99,102,241,0.2)",
+                                borderRadius: 10,
+                                display: "flex", flexDirection: "column", gap: 10,
+                              }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#a5b4fc", marginBottom: 2 }}>
+                                  Nouvelle séance — Classe {survFormClasse}
+                                </div>
+
+                                {/* Matière */}
+                                <div>
+                                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Matière</div>
+                                  <select value={survCreateForm.matiere_id}
+                                    onChange={e => setSurvCreateForm(f => ({ ...f, matiere_id: e.target.value }))}
+                                    style={{ width: "100%", padding: "8px 10px", background: "#0d0d1a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: survCreateForm.matiere_id ? "#fff" : "rgba(255,255,255,0.35)", fontFamily: F, fontSize: 12, outline: "none", boxSizing: "border-box" }}>
+                                    <option value="">-- Choisir la matière --</option>
+                                    {(matsFiltrees.length > 0 ? matsFiltrees : matieres).map(m => (
+                                      <option key={m.id} value={m.id} style={{ background: "#0d0d1a" }}>{m.nom}</option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                {/* Date */}
+                                <div>
+                                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Date de la séance</div>
+                                  <input type="date" value={survCreateForm.date}
+                                    onChange={e => setSurvCreateForm(f => ({ ...f, date: e.target.value }))}
+                                    style={{ width: "100%", padding: "8px 10px", background: "#0d0d1a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#fff", fontFamily: F, fontSize: 12, outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
+                                </div>
+
+                                {/* Heures */}
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                  <div>
+                                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Heure début</div>
+                                    <input type="time" value={survCreateForm.heure_debut}
+                                      onChange={e => setSurvCreateForm(f => ({ ...f, heure_debut: e.target.value }))}
+                                      style={{ width: "100%", padding: "8px 10px", background: "#0d0d1a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#fff", fontFamily: F, fontSize: 12, outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Heure fin</div>
+                                    <input type="time" value={survCreateForm.heure_fin}
+                                      onChange={e => setSurvCreateForm(f => ({ ...f, heure_fin: e.target.value }))}
+                                      style={{ width: "100%", padding: "8px 10px", background: "#0d0d1a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#fff", fontFamily: F, fontSize: 12, outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
+                                  </div>
+                                </div>
+
+                                {survCreateMsg && (
+                                  <div style={{ fontSize: 12, color: survCreateMsg.startsWith("✅") ? "#86efac" : "#fca5a5", fontWeight: 600 }}>
+                                    {survCreateMsg}
+                                  </div>
+                                )}
+
+                                <button
+                                  disabled={!survCreateForm.matiere_id || !survCreateForm.date || survCreateLoading}
+                                  onClick={async () => {
+                                    setSurvCreateLoading(true);
+                                    setSurvCreateMsg("");
+                                    try {
+                                      const { data } = await axios.post(`${API_URL}/api/gestion/sessions`, {
+                                        matiere_id:  survCreateForm.matiere_id,
+                                        classe:      survFormClasse,
+                                        date:        survCreateForm.date,
+                                        heure_debut: survCreateForm.heure_debut,
+                                        heure_fin:   survCreateForm.heure_fin,
+                                        salle:       survCreateForm.salle,
+                                      }, authHeaders());
+                                      setSurvCreateMsg(`✅ Séance créée : ${data.matiere} · ${data.date}`);
+                                      setSurvCreateOpen(false);
+                                      await loadSurvSessions(survFormClasse, survFormNiveau);
+                                      setSurvFormSessionId(data.id);
+                                    } catch (err) {
+                                      setSurvCreateMsg("❌ " + (err.response?.data?.detail || "Erreur"));
+                                    } finally {
+                                      setSurvCreateLoading(false);
+                                    }
+                                  }}
+                                  style={{
+                                    padding: "9px 14px", border: "none", borderRadius: 8,
+                                    background: survCreateForm.matiere_id && survCreateForm.date ? "linear-gradient(135deg,#6366f1,#4f46e5)" : "rgba(255,255,255,0.06)",
+                                    color: "#fff", fontSize: 12, fontWeight: 700,
+                                    fontFamily: F, cursor: "pointer",
+                                    opacity: survCreateLoading ? 0.6 : 1,
+                                  }}
+                                >
+                                  {survCreateLoading ? "Création..." : "✓ Créer la séance"}
+                                </button>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -3017,144 +3404,101 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                   {survAnalyzeLoading ? "Analyse en cours..." : "Lancer l'analyse des présences"}
                 </button>
 
-                {/* Résultat */}
-                {resVideo && (
-                  <Card style={{ borderColor: resVideo.error ? "rgba(239,68,68,0.3)" : "rgba(34,197,94,0.3)" }}>
-                    {resVideo.error ? (
-                      <div style={{ color: "#ef4444", fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
-                        <span style={{ fontSize: 18 }}>❌</span> {resVideo.error}
-                      </div>
-                    ) : (
-                      <>
-                        <SectionTitle title="Résultat de l'analyse" icon="📊" />
-
-                        {/* Compteurs */}
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
-                          <div style={{ textAlign: "center", padding: "14px 10px", borderRadius: 10,
-                            background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)" }}>
-                            <div style={{ fontSize: 26, fontWeight: 700, color: "#22c55e" }}>{resVideo.students_present}</div>
-                            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>Présents</div>
-                          </div>
-                          <div style={{ textAlign: "center", padding: "14px 10px", borderRadius: 10,
-                            background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
-                            <div style={{ fontSize: 26, fontWeight: 700, color: "#ef4444" }}>{resVideo.students_absent}</div>
-                            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>Absents</div>
-                          </div>
-                          <div style={{ textAlign: "center", padding: "14px 10px", borderRadius: 10,
-                            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                            <div style={{ fontSize: 26, fontWeight: 700, color: "rgba(255,255,255,0.5)" }}>{resVideo.sampled_frames}</div>
-                            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginTop: 3 }}>Frames analysées</div>
-                          </div>
-                        </div>
-
-                        {/* Liste présents */}
-                        {resVideo.presences?.length > 0 && (
-                          <div style={{ marginBottom: 14 }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: "#22c55e",
-                              letterSpacing: "0.06em", textTransform: "uppercase",
-                              marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                              <span>✅ Présents ({resVideo.presences.length})</span>
-                            </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                              {resVideo.presences.map((p, i) => (
-                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10,
-                                  padding: "8px 12px", borderRadius: 8,
-                                  background: "rgba(34,197,94,0.07)",
-                                  border: "1px solid rgba(34,197,94,0.15)" }}>
-                                  <div style={{ width: 30, height: 30, borderRadius: "50%",
-                                    background: "rgba(34,197,94,0.15)",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    fontSize: 12, fontWeight: 700, color: "#22c55e", flexShrink: 0 }}>
-                                    {(p.prenom || "?")[0]}{(p.nom || "?")[0]}
-                                  </div>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600 }}>{p.prenom} {p.nom}</div>
-                                  </div>
-                                  <div style={{ fontSize: 11, color: "#22c55e", fontWeight: 600,
-                                    background: "rgba(34,197,94,0.1)", padding: "2px 8px", borderRadius: 20 }}>
-                                    {p.similarity ? `${Math.round(p.similarity * 100)}%` : "—"}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Liste absents */}
-                        {resVideo.absences?.length > 0 && (
-                          <div>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444",
-                              letterSpacing: "0.06em", textTransform: "uppercase",
-                              marginBottom: 8 }}>
-                              ✗ Absents ({resVideo.absences.length})
-                            </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                              {resVideo.absences.map((a, i) => (
-                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10,
-                                  padding: "8px 12px", borderRadius: 8,
-                                  background: "rgba(239,68,68,0.05)",
-                                  border: "1px solid rgba(239,68,68,0.12)" }}>
-                                  <div style={{ width: 30, height: 30, borderRadius: "50%",
-                                    background: "rgba(239,68,68,0.12)",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    fontSize: 12, fontWeight: 700, color: "#ef4444", flexShrink: 0 }}>
-                                    {(a.prenom || "?")[0]}{(a.nom || "?")[0]}
-                                  </div>
-                                  <div style={{ fontSize: 13, fontWeight: 600 }}>{a.prenom} {a.nom}</div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    )}
+                {/* Erreur analyse */}
+                {resVideo?.error && (
+                  <Card style={{ borderColor: "rgba(239,68,68,0.3)" }}>
+                    <div style={{ color: "#ef4444", fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{ fontSize: 18 }}>❌</span> {resVideo.error}
+                    </div>
                   </Card>
                 )}
               </div>
+              )}
 
-              {/* ── OPTION 2 : URL Caméra (NON DISPONIBLE) ── */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, opacity: 0.55 }}>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 16px", borderRadius: 10,
-                  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)",
-                }}>
-                  <span style={{ fontSize: 18 }}>📡</span>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "rgba(255,255,255,0.5)" }}>Option 2 — URL Caméra (RTSP)</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>Non disponible à ce stade</div>
-                  </div>
-                  <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700,
-                    background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)",
-                    padding: "3px 10px", borderRadius: 20 }}>BIENTÔT</span>
-                </div>
-
-                <Card>
-                  <SectionTitle title="Flux caméra en temps réel" icon="📡" />
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 14, lineHeight: 1.6 }}>
-                    Entrez l'URL RTSP de la caméra. La salle et la séance seront détectées automatiquement d'après l'URL configurée dans le catalogue des salles.
-                  </div>
-                  <div style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.25)",
-                      letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 6 }}>URL caméra</div>
-                    <input value={survAnalyzeUrl} onChange={e => setSurvAnalyzeUrl(e.target.value)}
-                      placeholder="rtsp://192.168.1.100:554/stream" disabled
-                      style={{ width: "100%", padding: "9px 12px", background: "rgba(255,255,255,0.03)",
-                        border: "1px solid rgba(255,255,255,0.08)", borderRadius: 9,
-                        color: "rgba(255,255,255,0.3)", fontFamily: "Sora, sans-serif", fontSize: 13,
-                        outline: "none", boxSizing: "border-box", cursor: "not-allowed" }} />
-                  </div>
-                  <div style={{ padding: "12px 14px", borderRadius: 9,
-                    background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)" }}>
-                    <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 600, marginBottom: 4 }}>
-                      Comment ça fonctionnera
+              {/* ── Résultats (colonne droite quand vidéo analysée) ── */}
+              {survAnalyzeMode === "file" && resVideo && !resVideo.error && (
+                <Card style={{ borderColor: "rgba(34,197,94,0.25)" }}>
+                  <SectionTitle title="Résultat de l'analyse" icon="📊" />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
+                    <div style={{ textAlign: "center", padding: "12px 8px", borderRadius: 10, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)" }}>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: "#22c55e" }}>{resVideo.students_present}</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Présents</div>
                     </div>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", lineHeight: 1.6 }}>
-                      L'URL RTSP identifie automatiquement la salle → la séance en cours → les étudiants attendus. L'analyse démarre en temps réel sans saisie manuelle.
+                    <div style={{ textAlign: "center", padding: "12px 8px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: "#ef4444" }}>{resVideo.students_absent}</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Absents</div>
+                    </div>
+                    <div style={{ textAlign: "center", padding: "12px 8px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: "rgba(255,255,255,0.5)" }}>{resVideo.sampled_frames}</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>Frames</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {/* Présents */}
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7, display: "flex", alignItems: "center", gap: 5 }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        Présents ({resVideo.presences?.length || 0})
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {(resVideo.presences || []).length === 0
+                          ? <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", fontStyle: "italic" }}>Aucun</div>
+                          : (resVideo.presences || []).map((p, i) => (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 9px", borderRadius: 7, background: "rgba(34,197,94,0.07)", border: "1px solid rgba(34,197,94,0.16)" }}>
+                              <div style={{ width: 25, height: 25, borderRadius: "50%", flexShrink: 0, background: "rgba(34,197,94,0.18)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#22c55e" }}>{(p.prenom||"?")[0]}{(p.nom||"?")[0]}</div>
+                              <div style={{ flex: 1, fontSize: 11.5, fontWeight: 600, color: "#fff" }}>{p.prenom} {p.nom}</div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                    {/* Absents */}
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7, display: "flex", alignItems: "center", gap: 5 }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                        Absents ({resVideo.absences?.length || 0})
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {(resVideo.absences || []).length === 0
+                          ? <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", fontStyle: "italic" }}>Aucun</div>
+                          : (resVideo.absences || []).map((a, i) => (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 9px", borderRadius: 7, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.14)" }}>
+                              <div style={{ width: 25, height: 25, borderRadius: "50%", flexShrink: 0, background: "rgba(239,68,68,0.12)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#ef4444" }}>{(a.prenom||"?")[0]}{(a.nom||"?")[0]}</div>
+                              <div style={{ fontSize: 11.5, fontWeight: 500, color: "rgba(255,255,255,0.6)" }}>{a.prenom} {a.nom}</div>
+                            </div>
+                          ))}
+                      </div>
                     </div>
                   </div>
                 </Card>
-              </div>
+              )}
+
+              {/* ── URL CAMÉRA ── */}
+              {survAnalyzeMode === "url" && (
+                <Card>
+                  <SectionTitle title="Flux caméra en temps réel" icon="📡" />
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 14, lineHeight: 1.6 }}>
+                    Entrez l'URL RTSP de la caméra. La séance sera détectée automatiquement d'après l'emploi du temps.
+                  </div>
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.35)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 6 }}>URL caméra</div>
+                    <input value={survAnalyzeUrl} onChange={e => setSurvAnalyzeUrl(e.target.value)}
+                      placeholder="rtsp://192.168.1.100:554/stream"
+                      style={{ width: "100%", padding: "10px 13px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 9, color: "#fff", fontFamily: F, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                  <div style={{ padding: "12px 14px", borderRadius: 9, background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)", marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 600, marginBottom: 4 }}>Fonctionnement en production</div>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", lineHeight: 1.6 }}>
+                      L'URL RTSP identifie la salle → séance en cours → étudiants attendus. Analyse en temps réel sans saisie manuelle.
+                    </div>
+                  </div>
+                  <div style={{ padding: "10px 14px", borderRadius: 9, background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#f87171", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    Fonctionnalité non disponible à ce stade — nécessite une caméra réseau
+                  </div>
+                </Card>
+              )}
+
             </div>
           </div>
           );
@@ -3173,74 +3517,120 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
               }}>{msg}</div>
             )}
             {/* Sous-navigation Gestion */}
-            <div style={{
-              display: "flex", gap: 2, flexWrap: "wrap",
-              background: "rgba(255,255,255,0.02)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 10, padding: 4,
-            }}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {gTabs.map(t => (
                 <button key={t.id} onClick={() => setGTab(t.id)} style={{
-                  padding: "7px 14px", borderRadius: 7, border: "none", cursor: "pointer",
-                  background: gTab === t.id ? "#6366f1" : "transparent",
-                  color: gTab === t.id ? "#fff" : "rgba(255,255,255,0.4)",
+                  padding: "8px 16px", borderRadius: 8, cursor: "pointer",
+                  background: gTab === t.id ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.03)",
+                  border: gTab === t.id ? "1px solid rgba(99,102,241,0.3)" : "1px solid rgba(255,255,255,0.07)",
+                  color: gTab === t.id ? "#c7d2fe" : "rgba(255,255,255,0.4)",
                   fontFamily: F, fontSize: 12, fontWeight: gTab === t.id ? 600 : 400,
-                  transition: "all 0.15s",
-                }}>{t.label}</button>
+                  transition: "all 0.15s", position: "relative",
+                }}>
+                  {gTab === t.id && (
+                    <div style={{ position: "absolute", left: 0, top: "20%", bottom: "20%",
+                      width: 2, borderRadius: 2, background: "#6366f1" }} />
+                  )}
+                  {t.label}
+                </button>
               ))}
             </div>
 
             {/* Professeurs */}
             {gTab === "profs" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                <Card>
-                  <SectionTitle title="Ajouter un professeur" icon="➕" />
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <Input placeholder="Nom" value={formProf.nom}
-                        onChange={e => setFormProf({...formProf, nom: e.target.value})} />
-                      <Input placeholder="Prénom" value={formProf.prenom}
-                        onChange={e => setFormProf({...formProf, prenom: e.target.value})} />
-                    </div>
-                    <Input placeholder="Email" type="email" value={formProf.email}
-                      onChange={e => setFormProf({...formProf, email: e.target.value})} />
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", padding: "4px 0" }}>
-                      Un mot de passe temporaire sera généré automatiquement
-                    </div>
-                    <Btn onClick={addProf}>Créer le compte</Btn>
-                    {createdPassword && (
-                      <div style={{
-                        background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)",
-                        borderRadius: 10, padding: "12px 14px",
-                      }}>
-                        <div style={{ fontSize: 12, color: "#22c55e", fontWeight: 600, marginBottom: 4 }}>
-                          Mot de passe temporaire généré
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+                {/* Modal Ajouter Professeur */}
+                {showAddProf && (
+                  <div onClick={() => { setShowAddProf(false); setCreatedPassword(""); }}
+                    style={{ position: "fixed", inset: 0, zIndex: 300,
+                      background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)",
+                      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+                    <div onClick={e => e.stopPropagation()}
+                      style={{ background: "#0d0d1a", border: "1px solid rgba(255,255,255,0.09)",
+                        borderRadius: 14, width: "100%", maxWidth: 480,
+                        boxShadow: "0 24px 60px rgba(0,0,0,0.6)" }}>
+                      {/* Header modal */}
+                      <div style={{ padding: "18px 22px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                        display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: "#f1f5f9" }}>Ajouter un professeur</div>
+                        <button onClick={() => { setShowAddProf(false); setCreatedPassword(""); }}
+                          style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)",
+                            cursor: "pointer", fontSize: 18, lineHeight: 1 }}>✕</button>
+                      </div>
+                      {/* Corps modal */}
+                      <div style={{ padding: "20px 22px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600,
+                              textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Nom</div>
+                            <Input placeholder="Benali" value={formProf.nom}
+                              onChange={e => setFormProf({...formProf, nom: e.target.value})} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600,
+                              textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Prénom</div>
+                            <Input placeholder="Ahmed" value={formProf.prenom}
+                              onChange={e => setFormProf({...formProf, prenom: e.target.value})} />
+                          </div>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <code style={{
-                            fontSize: 15, fontWeight: 700, color: "#fff",
-                            background: "rgba(255,255,255,0.06)", padding: "4px 10px",
-                            borderRadius: 6, letterSpacing: 1, flex: 1,
-                          }}>{createdPassword}</code>
-                          <button onClick={() => { navigator.clipboard.writeText(createdPassword); }} style={{
-                            background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
-                            borderRadius: 6, color: "#a5b4fc", cursor: "pointer",
-                            padding: "4px 10px", fontSize: 11, fontFamily: "Sora, sans-serif",
-                          }}>Copier</button>
-                          <button onClick={() => setCreatedPassword("")} style={{
-                            background: "transparent", border: "none",
-                            color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 16,
-                          }}>✕</button>
+                        <div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600,
+                            textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Email</div>
+                          <Input placeholder="prof@esisa.ma" type="email" value={formProf.email}
+                            onChange={e => setFormProf({...formProf, email: e.target.value})} />
                         </div>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 6 }}>
-                          Transmettez ce mot de passe au professeur. Il pourra le modifier depuis son dashboard.
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", padding: "2px 0" }}>
+                          Un mot de passe temporaire sera généré automatiquement.
+                        </div>
+                        {createdPassword && (
+                          <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)",
+                            borderRadius: 10, padding: "12px 14px" }}>
+                            <div style={{ fontSize: 11, color: "#10b981", fontWeight: 600, marginBottom: 8 }}>
+                              Compte créé — mot de passe temporaire
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <code style={{ fontSize: 16, fontWeight: 700, color: "#f1f5f9",
+                                background: "rgba(255,255,255,0.06)", padding: "6px 12px",
+                                borderRadius: 7, letterSpacing: 2, flex: 1 }}>{createdPassword}</code>
+                              <button onClick={() => navigator.clipboard.writeText(createdPassword)}
+                                style={{ background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)",
+                                  borderRadius: 7, color: "#a5b4fc", cursor: "pointer",
+                                  padding: "6px 12px", fontSize: 11, fontFamily: F }}>Copier</button>
+                            </div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 8 }}>
+                              Transmettez ce mot de passe au professeur.
+                            </div>
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                          <Btn onClick={async () => { await addProf(); }}
+                            style={{ flex: 1, padding: "10px" }}
+                            disabled={!formProf.nom || !formProf.prenom || !formProf.email}>
+                            Créer le compte
+                          </Btn>
+                          <Btn onClick={() => { setShowAddProf(false); setCreatedPassword(""); }}
+                            color="rgba(255,255,255,0.05)"
+                            style={{ padding: "10px 16px", color: "rgba(255,255,255,0.4)",
+                              border: "1px solid rgba(255,255,255,0.08)" }}>
+                            Annuler
+                          </Btn>
                         </div>
                       </div>
-                    )}
+                    </div>
                   </div>
-                </Card>
+                )}
+
                 <Card>
-                  <SectionTitle title={`Professeurs (${profs.filter(p => p.is_active).length} actifs${profs.some(p => !p.is_active) ? ` · ${profs.filter(p => !p.is_active).length} désactivés` : ""})`} icon="👨‍🏫" />
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
+                    <SectionTitle title={`Professeurs (${profs.filter(p => p.is_active).length} actifs${profs.some(p => !p.is_active) ? ` · ${profs.filter(p => !p.is_active).length} désactivés` : ""})`} />
+                    <button onClick={() => { setFormProf({ nom:"", prenom:"", email:"" }); setCreatedPassword(""); setShowAddProf(true); }}
+                      style={{ marginLeft: "auto", padding: "7px 16px", borderRadius: 7,
+                        background: "#6366f1", border: "none", color: "#fff",
+                        fontFamily: F, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      + Ajouter un professeur
+                    </button>
+                  </div>
                   {profs.length === 0 ? <EmptyState message="Aucun professeur" /> :
                     profs.map((p, i) => (
                       <div key={i} style={{
@@ -3357,9 +3747,92 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                   </div>
                 </Card>
 
+                {/* Modal Ajouter Matière */}
+                {showAddMat && (
+                  <div onClick={() => setShowAddMat(false)}
+                    style={{ position: "fixed", inset: 0, zIndex: 300,
+                      background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)",
+                      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+                    <div onClick={e => e.stopPropagation()}
+                      style={{ background: "#0d0d1a", border: "1px solid rgba(255,255,255,0.09)",
+                        borderRadius: 14, width: "100%", maxWidth: 500,
+                        boxShadow: "0 24px 60px rgba(0,0,0,0.6)" }}>
+                      <div style={{ padding: "18px 22px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                        display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: "#f1f5f9" }}>Ajouter une matière</div>
+                        <button onClick={() => setShowAddMat(false)}
+                          style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)",
+                            cursor: "pointer", fontSize: 18, lineHeight: 1 }}>✕</button>
+                      </div>
+                      <div style={{ padding: "20px 22px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600,
+                            textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Nom de la matière</div>
+                          <Input placeholder="Ex: Analyse Numérique II" value={formMat.nom}
+                            onChange={e => setFormMat({...formMat, nom: e.target.value})} />
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600,
+                              textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Code</div>
+                            <Input placeholder="Ex: AN2" value={formMat.code}
+                              onChange={e => setFormMat({...formMat, code: e.target.value})} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600,
+                              textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Coefficient</div>
+                            <Input placeholder="1" type="number" value={formMat.coefficient}
+                              onChange={e => setFormMat({...formMat, coefficient: e.target.value})} />
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600,
+                            textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Niveau</div>
+                          <Select value={formMat.annee_scolaire}
+                            onChange={e => setFormMat({...formMat, annee_scolaire: e.target.value})}>
+                            {dynNiveaux.map(n => <option key={n} value={n}>{n}</option>)}
+                          </Select>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600,
+                            textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Professeur (optionnel)</div>
+                          <Select value={formMat.professeur_id}
+                            onChange={e => setFormMat({...formMat, professeur_id: e.target.value})}>
+                            <option value="">— Aucun —</option>
+                            {profs.filter(p => p.is_active).map(p => (
+                              <option key={p.id} value={p.id}>{p.prenom} {p.nom}</option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                          <Btn onClick={async () => { await addMat(); setShowAddMat(false); }}
+                            style={{ flex: 1, padding: "10px" }}
+                            disabled={!formMat.nom}>
+                            Créer la matière
+                          </Btn>
+                          <Btn onClick={() => setShowAddMat(false)}
+                            color="rgba(255,255,255,0.05)"
+                            style={{ padding: "10px 16px", color: "rgba(255,255,255,0.4)",
+                              border: "1px solid rgba(255,255,255,0.08)" }}>
+                            Annuler
+                          </Btn>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Liste matières */}
                 <Card>
-                  <SectionTitle title={`Matières${gMatNiveau ? ` — ${gMatNiveau}` : ""}${gMatGroupe ? ` · Groupe ${gMatGroupe}` : ""} (${matieresFiltrees.length})`} icon="📚" />
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
+                    <SectionTitle title={`Matières${gMatNiveau ? ` — ${gMatNiveau}` : ""}${gMatGroupe ? ` · Groupe ${gMatGroupe}` : ""} (${matieresFiltrees.length})`} />
+                    <button onClick={() => { setFormMat({ nom:"", code:"", coefficient:"1", annee_scolaire: gMatNiveau || dynNiveaux[0] || "", professeur_id:"" }); setShowAddMat(true); }}
+                      style={{ marginLeft: "auto", padding: "7px 16px", borderRadius: 7,
+                        background: "#6366f1", border: "none", color: "#fff",
+                        fontFamily: F, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      + Ajouter une matière
+                    </button>
+                  </div>
                   {matieresFiltrees.length === 0 ? (
                     <div style={{ textAlign: "center", padding: "32px 16px", color: "rgba(255,255,255,0.25)" }}>
                       <div style={{ fontSize: 30, marginBottom: 8 }}>📚</div>
@@ -3402,32 +3875,6 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                   )}
                 </Card>
 
-                {/* Formulaire ajout matière */}
-                <Card>
-                  <SectionTitle title="Ajouter une matière" icon="➕" />
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <Input placeholder="Nom de la matière" value={formMat.nom}
-                      onChange={e => setFormMat({...formMat, nom: e.target.value})} />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                      <Input placeholder="Code (ex: AN2)" value={formMat.code}
-                        onChange={e => setFormMat({...formMat, code: e.target.value})} />
-                      <Input placeholder="Coefficient" type="number" value={formMat.coefficient}
-                        onChange={e => setFormMat({...formMat, coefficient: e.target.value})} />
-                      <Select value={formMat.annee_scolaire}
-                        onChange={e => setFormMat({...formMat, annee_scolaire: e.target.value})}>
-                        {dynNiveaux.map(n => <option key={n} value={n}>{n}</option>)}
-                      </Select>
-                    </div>
-                    <Select value={formMat.professeur_id}
-                      onChange={e => setFormMat({...formMat, professeur_id: e.target.value})}>
-                      <option value="">-- Assigner un professeur (optionnel) --</option>
-                      {profs.filter(p => p.is_active).map(p => (
-                        <option key={p.id} value={p.id}>{p.prenom} {p.nom}</option>
-                      ))}
-                    </Select>
-                    <Btn onClick={addMat}>Créer la matière</Btn>
-                  </div>
-                </Card>
               </div>
               );
             })()}
@@ -3440,7 +3887,8 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                 (!gEmploiGroupe  || e.groupe === gEmploiGroupe)
               );
               const JOURS_ORDER = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
-              const emploisTries = [...emploisFiltres].sort((a, b) =>
+              const emploisTries = [...emploisFiltres].sort((a, b) =>  // keep for compat
+
                 JOURS_ORDER.indexOf(a.jour) - JOURS_ORDER.indexOf(b.jour) ||
                 (a.heure_debut || "").localeCompare(b.heure_debut || "")
               );
@@ -3486,8 +3934,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                 {emploisFiltres.length === 0 ? (
                   <Card>
                     <div style={{ textAlign: "center", padding: "40px 20px" }}>
-                      <div style={{ fontSize: 36, marginBottom: 12 }}>📅</div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.4)" }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.35)" }}>
                         {gEmploiNiveau
                           ? `Aucun emploi du temps pour ${gEmploiNiveau}${gEmploiGroupe ? ` — Groupe ${gEmploiGroupe}` : ""}`
                           : "Sélectionnez un niveau pour afficher l'emploi du temps"}
@@ -3495,83 +3942,153 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                     </div>
                   </Card>
                 ) : (() => {
+                  // ─── Constantes grille ───────────────────────────────────
                   const JOURS_VIS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
+                  // 22 slots de 30min : 08h30 → 19h30
+                  const TIME_SLOTS = Array.from({length: 22}, (_, i) => {
+                    const min = 510 + i * 30;
+                    const h = Math.floor(min / 60), m = min % 60;
+                    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                  });
+                  const timeToCol = t => {
+                    if (!t) return -1;
+                    const [h, m] = t.slice(0,5).split(':').map(Number);
+                    return Math.round((h * 60 + m - 510) / 30);
+                  };
+                  const courseStyle = nom => {
+                    if (!nom) return { bg:"rgba(22,163,74,0.18)", border:"rgba(22,163,74,0.35)", text:"#4ade80" };
+                    const n = nom.toLowerCase();
+                    if (n.includes("business") || n.includes("tec/") || n.includes("droit") || n.includes("citoyenn")) {
+                      return { bg:"rgba(217,119,6,0.2)", border:"rgba(217,119,6,0.4)", text:"#fbbf24" };
+                    }
+                    return { bg:"rgba(22,163,74,0.18)", border:"rgba(22,163,74,0.35)", text:"#4ade80" };
+                  };
+
                   const groupes = [...new Set(emploisFiltres.map(e => e.groupe))].sort();
                   return groupes.map(gr => {
                     const creneaux = emploisFiltres.filter(e => e.groupe === gr);
-                    // Créneaux uniques triés par heure_debut
-                    const slots = [...new Set(creneaux.map(e => e.heure_debut?.slice(0,5)))]
-                      .filter(Boolean).sort();
                     const joursPresents = JOURS_VIS.filter(j => creneaux.some(e => e.jour === j));
-                    const lookup = (jour, slot) =>
-                      creneaux.find(e => e.jour === jour && e.heure_debut?.slice(0,5) === slot);
+                    // Unused vars kept for linter
+                    const slots = []; const joursPresents2 = joursPresents;
                     return (
-                      <Card key={gr} style={{ padding: "18px 16px" }}>
-                        <div style={{ display: "flex", alignItems: "center", marginBottom: 16, gap: 10 }}>
-                          <span style={{ fontSize: 15, fontWeight: 700, color: "#a5b4fc" }}>Groupe {gr}</span>
+                      <Card key={gr} style={{ padding: "16px 12px" }}>
+                        {/* Titre groupe */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0" }}>Groupe {gr}</span>
                           {gEmploiNiveau && (
-                            <span style={{ fontSize: 11, color: "#7dd3fc", background: "rgba(14,165,233,0.1)",
+                            <span style={{ fontSize: 11, color: "#7dd3fc",
+                              background: "rgba(14,165,233,0.08)", border: "1px solid rgba(14,165,233,0.2)",
                               padding: "2px 10px", borderRadius: 20 }}>{gEmploiNiveau}</span>
                           )}
                           <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
                             {creneaux.length} créneau{creneaux.length > 1 ? "x" : ""}
                           </span>
                         </div>
+
+                        {/* Grille horizontale */}
                         <div style={{ overflowX: "auto" }}>
-                          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 500 }}>
+                          <table style={{
+                            borderCollapse: "collapse",
+                            tableLayout: "fixed",
+                            width: "100%",
+                            minWidth: 900,
+                          }}>
+                            {/* ── En-tête horaires ── */}
                             <thead>
                               <tr>
-                                <th style={{ padding: "8px 10px", width: 80, fontSize: 11,
-                                  color: "rgba(255,255,255,0.3)", fontWeight: 600, textAlign: "left",
-                                  borderBottom: "1px solid rgba(255,255,255,0.08)" }}>Horaire</th>
-                                {joursPresents.map(j => (
-                                  <th key={j} style={{ padding: "8px 10px", fontSize: 12, fontWeight: 700,
-                                    color: "#a5b4fc", textAlign: "center",
-                                    borderBottom: "1px solid rgba(255,255,255,0.08)",
-                                    background: "rgba(99,102,241,0.06)" }}>{j}</th>
-                                ))}
+                                <th style={{ width: "7%", minWidth: 72,
+                                  background: "rgba(255,255,255,0.03)",
+                                  border: "1px solid rgba(255,255,255,0.07)", padding: 0 }} />
+                                {TIME_SLOTS.map((t, i) => {
+                                  const nextMin = 510 + (i + 1) * 30;
+                                  const nh = Math.floor(nextMin/60), nm = nextMin%60;
+                                  const endT = `${String(nh).padStart(2,'0')}h${String(nm).padStart(2,'0')}`;
+                                  const startT = t.replace(':', 'h');
+                                  return (
+                                    <th key={t} style={{
+                                      padding: "4px 1px", textAlign: "center",
+                                      background: "rgba(255,255,255,0.03)",
+                                      border: "1px solid rgba(255,255,255,0.07)",
+                                      verticalAlign: "middle" }}>
+                                      <div style={{ fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.5)",
+                                        lineHeight: 1.2 }}>{startT}</div>
+                                      <div style={{ fontSize: 8, color: "rgba(255,255,255,0.25)",
+                                        lineHeight: 1.2 }}>{endT}</div>
+                                    </th>
+                                  );
+                                })}
                               </tr>
                             </thead>
+
+                            {/* ── Lignes jours ── */}
                             <tbody>
-                              {slots.map((slot, si) => {
-                                const sampleCours = creneaux.find(e => e.heure_debut?.slice(0,5) === slot);
-                                const hFin = sampleCours?.heure_fin?.slice(0,5) || "";
+                              {JOURS_VIS.map(jour => {
+                                const dayCours = creneaux.filter(c => c.jour === jour);
+                                // slotMap[i] = cours ou null
+                                const slotMap = new Array(22).fill(null);
+                                dayCours.forEach(c => {
+                                  const start = timeToCol(c.heure_debut);
+                                  const end   = timeToCol(c.heure_fin);
+                                  if (start >= 0 && start < 22 && end > start) {
+                                    slotMap[start] = { ...c, span: Math.min(end - start, 22 - start) };
+                                  }
+                                });
+                                // Construire les cellules
+                                const cells = [];
+                                let i = 0;
+                                while (i < 22) {
+                                  const cours = slotMap[i];
+                                  if (cours) {
+                                    const cs = courseStyle(cours.matiere);
+                                    cells.push(
+                                      <td key={i} colSpan={cours.span} style={{
+                                        background: cs.bg,
+                                        border: `1px solid ${cs.border}`,
+                                        padding: "8px 6px",
+                                        verticalAlign: "middle",
+                                        textAlign: "center",
+                                        position: "relative",
+                                        height: 64,
+                                      }}>
+                                        <div style={{ fontSize: 11, fontWeight: 700, color: cs.text,
+                                          lineHeight: 1.4, wordBreak: "break-word" }}>
+                                          {cours.matiere}
+                                        </div>
+                                        {cours.salle && (
+                                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginTop: 4,
+                                            fontWeight: 500 }}>
+                                            {cours.salle}
+                                          </div>
+                                        )}
+                                        <button onClick={() => deleteEmploi(cours.id)}
+                                          title="Supprimer"
+                                          style={{ position: "absolute", top: 3, right: 3,
+                                            background: "rgba(0,0,0,0.2)", border: "none",
+                                            borderRadius: 3, color: "rgba(255,255,255,0.4)",
+                                            cursor: "pointer", fontSize: 9, padding: "1px 3px",
+                                            lineHeight: 1 }}>✕</button>
+                                      </td>
+                                    );
+                                    i += cours.span;
+                                  } else {
+                                    cells.push(
+                                      <td key={i} style={{ border: "1px solid rgba(255,255,255,0.04)",
+                                        background: "transparent" }} />
+                                    );
+                                    i++;
+                                  }
+                                }
                                 return (
-                                  <tr key={slot} style={{ background: si % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
-                                    <td style={{ padding: "10px 10px", fontSize: 11, color: "rgba(255,255,255,0.4)",
-                                      whiteSpace: "nowrap", fontWeight: 600,
-                                      borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                                      {slot}<br/><span style={{ fontWeight: 400, color: "rgba(255,255,255,0.25)" }}>{hFin}</span>
+                                  <tr key={jour}>
+                                    <td style={{ padding: "10px 6px", fontWeight: 700, fontSize: 12,
+                                      color: "#a5b4fc", whiteSpace: "nowrap",
+                                      background: "rgba(99,102,241,0.07)",
+                                      border: "1px solid rgba(255,255,255,0.07)",
+                                      textAlign: "center", verticalAlign: "middle",
+                                      width: "7%", minWidth: 72 }}>
+                                      {jour}
                                     </td>
-                                    {joursPresents.map(j => {
-                                      const c = lookup(j, slot);
-                                      return (
-                                        <td key={j} style={{ padding: "6px 8px", textAlign: "center",
-                                          borderBottom: "1px solid rgba(255,255,255,0.04)",
-                                          borderLeft: "1px solid rgba(255,255,255,0.04)" }}>
-                                          {c ? (
-                                            <div style={{ background: "rgba(99,102,241,0.12)",
-                                              border: "1px solid rgba(99,102,241,0.25)",
-                                              borderRadius: 8, padding: "8px 6px", position: "relative" }}>
-                                              <div style={{ fontSize: 12, fontWeight: 600, color: "#e0e7ff",
-                                                lineHeight: 1.3 }}>{c.matiere}</div>
-                                              {c.salle && (
-                                                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 3 }}>
-                                                  {c.salle}
-                                                </div>
-                                              )}
-                                              <button onClick={() => deleteEmploi(c.id)}
-                                                title="Supprimer"
-                                                style={{ position: "absolute", top: 3, right: 4,
-                                                  background: "none", border: "none", color: "rgba(239,68,68,0.5)",
-                                                  cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1 }}>✕</button>
-                                            </div>
-                                          ) : (
-                                            <div style={{ height: 40 }} />
-                                          )}
-                                        </td>
-                                      );
-                                    })}
+                                    {cells}
                                   </tr>
                                 );
                               })}
@@ -4814,6 +5331,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
           </div>
         )}
       </div>
+      </div> {/* fin contenu principal */}
     </div>
   );
 }

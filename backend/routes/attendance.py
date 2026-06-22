@@ -31,18 +31,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
-SIMILARITY_THRESHOLD = 0.62   # caméra haute/plafond : vues top-down scorent moins fort
-                              # que le frontal (ArcFace est entraîné surtout en frontal)
-SIMILARITY_MARGIN    = 0.08   # écart minimum entre 1er et 2ème candidat
+SIMILARITY_THRESHOLD = 0.45   # seuil abaissé pour vidéos de classe (angle + qualité variable)
+SIMILARITY_MARGIN    = 0.05   # marge réduite
 FRAME_SAMPLE_RATE    = 30     # 1 frame analysée toutes les N frames (1/s à 30fps)
 MAX_SAMPLED_FRAMES   = 60     # limite pour éviter un timeout sur très longues vidéos
 
-# MiniFASNetV2 est entraîné sur des visages frontaux en gros plan.
-# Pour une caméra haute (plafond), les visages sont petits, flous et vus de dessus
-# → le modèle les classifie tous comme "faux" (faux positifs massifs).
-# On désactive l'anti-spoofing pour les petits visages (< ANTISPOOF_MIN_PX px).
-# Les risques de spoofing par photo brandie sont quasi nuls avec une caméra au plafond.
-ANTISPOOF_MIN_PX = 80   # en dessous de cette taille, skip l'anti-spoofing
+# Anti-spoofing désactivé pour l'analyse vidéo :
+# MiniFASNetV2 est entraîné sur des visages frontaux en direct.
+# Une vidéo enregistrée (surface 2D) est systématiquement rejetée comme "faux".
+# On met un seuil très élevé pour ne jamais déclencher l'anti-spoofing sur vidéo.
+ANTISPOOF_MIN_PX = 99999  # désactivé — skip anti-spoofing pour toutes les frames vidéo
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

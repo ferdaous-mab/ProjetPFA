@@ -1082,6 +1082,54 @@ async def get_presences_session(
     }
 
 
+class SessionCreate(BaseModel):
+    matiere_id:  str
+    classe:      str
+    date:        str          # YYYY-MM-DD
+    heure_debut: Optional[str] = None   # HH:MM
+    heure_fin:   Optional[str] = None
+    salle:       Optional[str] = None
+
+@router.post("/gestion/sessions")
+async def create_session_manual(
+    data: SessionCreate,
+    db:   Session = Depends(get_db),
+    _=Depends(admin_only)
+):
+    """Créer une séance manuellement (pour analyse vidéo)."""
+    from db.models import Session as SessionModel
+    from datetime import date as dt_date, time as dt_time
+
+    mat = db.query(Matiere).filter(Matiere.id == data.matiere_id).first()
+    if not mat:
+        raise HTTPException(status_code=404, detail="Matière introuvable")
+
+    def parse_time(t):
+        if not t: return None
+        h, m = t.split(":")
+        return dt_time(int(h), int(m))
+
+    session = SessionModel(
+        matiere_id  = data.matiere_id,
+        classe      = data.classe,
+        date        = dt_date.fromisoformat(data.date),
+        heure_debut = parse_time(data.heure_debut),
+        heure_fin   = parse_time(data.heure_fin),
+        salle       = data.salle or "",
+        status      = "terminee",
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return {
+        "id":          str(session.id),
+        "matiere":     mat.nom,
+        "classe":      session.classe,
+        "date":        str(session.date),
+        "heure_debut": str(session.heure_debut) if session.heure_debut else None,
+    }
+
+
 @router.delete("/gestion/sessions/{session_id}")
 async def delete_session(
     session_id: str,

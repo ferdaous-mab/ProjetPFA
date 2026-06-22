@@ -59,12 +59,21 @@ export default function ResetPasswordPage({ token, onDone }) {
         position: "relative", zIndex: 1,
       }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{
-            width: 52, height: 52, borderRadius: 14,
-            background: `linear-gradient(135deg, ${ACCENT}, ${ACCENT}99)`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 24, margin: "0 auto 14px",
-          }}>🔒</div>
+          <div style={{ filter:"drop-shadow(0 4px 14px rgba(108,99,255,0.5))", position:"relative", width:58, height:58, margin:"0 auto 14px" }}>
+            <svg width="58" height="58" viewBox="0 0 58 58" fill="none">
+              <defs>
+                <linearGradient id="hexGradReset" x1="0" y1="0" x2="58" y2="58" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#1e1b4b"/>
+                  <stop offset="100%" stopColor="#3730a3"/>
+                </linearGradient>
+              </defs>
+              <polygon points="29,3 53,16 53,42 29,55 5,42 5,16" fill="url(#hexGradReset)"/>
+              <polygon points="29,8 48,19 48,39 29,50 10,39 10,19" fill="none" stroke="rgba(167,139,250,0.32)" strokeWidth="1.3"/>
+            </svg>
+            <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <span style={{ fontSize:15, fontWeight:900, color:"#fff", letterSpacing:"-0.5px", fontFamily:"sans-serif" }}>SC</span>
+            </div>
+          </div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: 0 }}>
             SmartCampus IA
           </h1>

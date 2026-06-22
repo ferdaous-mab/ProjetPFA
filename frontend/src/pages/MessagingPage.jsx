@@ -177,6 +177,7 @@ export default function MessagingPage({ user, onBack }) {
   const [messages,     setMessages]     = useState([]);
   const [input,        setInput]        = useState("");
   const [search,       setSearch]       = useState("");
+  const [roleFilter,   setRoleFilter]   = useState("all");
   const [sending,      setSending]      = useState(false);
   const [loadingMsgs,  setLoadingMsgs]  = useState(false);
   const [showList,     setShowList]     = useState(true);
@@ -405,12 +406,19 @@ export default function MessagingPage({ user, onBack }) {
     if (recv.length > 0) firstUnreadIdx = recv[Math.max(0, recv.length - unreadAtOpen)];
   }
 
+  const isAdmin = user?.role === "admin";
+
   const filtered = contacts.filter(c => {
     const q = search.toLowerCase();
-    return (c.nom || "").toLowerCase().includes(q) ||
-           (c.prenom || "").toLowerCase().includes(q) ||
-           ROLE_LABEL(c.role).toLowerCase().includes(q);
+    const matchSearch = (c.nom || "").toLowerCase().includes(q) ||
+                        (c.prenom || "").toLowerCase().includes(q) ||
+                        ROLE_LABEL(c.role).toLowerCase().includes(q);
+    const matchRole = !isAdmin || roleFilter === "all" || c.role === roleFilter;
+    return matchSearch && matchRole;
   });
+
+  const countByRole = (role) => contacts.filter(c => c.role === role).length;
+  const unreadByRole = (role) => contacts.filter(c => c.role === role).reduce((s,c) => s + (c.unread||0), 0);
 
   const totalUnread = contacts.reduce((s, c) => s + (c.unread || 0), 0);
   const isMobile    = window.innerWidth < 700;
@@ -418,7 +426,7 @@ export default function MessagingPage({ user, onBack }) {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{
-      height: "100vh", overflow: "hidden",
+      position: "absolute", inset: 0, overflow: "hidden",
       background: "radial-gradient(ellipse at 20% 40%, #1a1040 0%, #0a0a1a 60%, #000 100%)",
       fontFamily: "Sora, sans-serif", display: "flex", flexDirection: "column",
     }}>
@@ -455,48 +463,13 @@ export default function MessagingPage({ user, onBack }) {
         />
       )}
 
-      {/* ── Header ────────────────────────────────────────────────────────── */}
-      <div style={{
-        padding: "11px 18px", flexShrink: 0,
-        borderBottom: "1px solid rgba(255,255,255,0.06)",
-        background: "rgba(255,255,255,0.02)",
-        display: "flex", alignItems: "center", gap: 12,
-      }}>
-        <button onClick={onBack} className="icon-btn" style={{
-          background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 8, color: "rgba(255,255,255,0.65)", cursor: "pointer",
-          padding: "5px 12px", fontFamily: "Sora,sans-serif", fontSize: 13,
-        }}>← Retour</button>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 9,
-            background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.28)",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-          }}>💬</div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Messagerie</div>
-            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.35)" }}>Conversations privées</div>
-          </div>
-        </div>
-
-        {totalUnread > 0 && (
-          <div style={{
-            marginLeft: "auto",
-            background: "rgba(239,68,68,0.14)", color: "#f87171",
-            fontSize: 11.5, padding: "3px 10px", borderRadius: 20, fontWeight: 700,
-            border: "1px solid rgba(239,68,68,0.25)",
-          }}>{totalUnread} non lu{totalUnread > 1 ? "s" : ""}</div>
-        )}
-      </div>
-
       {/* ── Body ─────────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
         {/* ── Sidebar contacts ───────────────────────────────────────────── */}
         <div style={{
-          width:    isMobile ? (showList ? "100%" : 0) : 300,
-          minWidth: isMobile ? (showList ? "100%" : 0) : 300,
+          width:    isMobile ? (showList ? "100%" : 0) : 220,
+          minWidth: isMobile ? (showList ? "100%" : 0) : 220,
           borderRight: "1px solid rgba(255,255,255,0.06)",
           display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0,
         }}>
@@ -515,6 +488,59 @@ export default function MessagingPage({ user, onBack }) {
               }}
             />
           </div>
+
+          {/* ── Filtres rôle (admin uniquement) ── */}
+          {isAdmin && (
+            <div style={{
+              display: "flex", gap: 6, padding: "0 12px 10px", flexShrink: 0,
+            }}>
+              {[
+                { key: "all",        label: "Tous",         icon: "👥", color: "#6366f1" },
+                { key: "etudiant",   label: "Étudiants",    icon: "🎓", color: "#a78bfa" },
+                { key: "professeur", label: "Professeurs",  icon: "👨‍🏫", color: "#0ea5e9" },
+              ].map(tab => {
+                const active  = roleFilter === tab.key;
+                const unread  = tab.key === "all"
+                  ? totalUnread
+                  : unreadByRole(tab.key);
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setRoleFilter(tab.key)}
+                    style={{
+                      flex: 1, padding: "7px 4px",
+                      borderRadius: 10, cursor: "pointer",
+                      border: active
+                        ? `1px solid ${tab.color}55`
+                        : "1px solid rgba(255,255,255,0.07)",
+                      background: active
+                        ? `${tab.color}18`
+                        : "rgba(255,255,255,0.03)",
+                      color: active ? tab.color : "rgba(255,255,255,0.38)",
+                      fontFamily: "Sora,sans-serif",
+                      fontSize: 11, fontWeight: active ? 700 : 500,
+                      transition: "all .15s",
+                      display: "flex", flexDirection: "column",
+                      alignItems: "center", gap: 2, position: "relative",
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{tab.icon}</span>
+                    <span>{tab.label}</span>
+                    {unread > 0 && (
+                      <div style={{
+                        position: "absolute", top: 3, right: 5,
+                        background: "#ef4444", color: "#fff",
+                        fontSize: 9, fontWeight: 700,
+                        minWidth: 15, height: 15, borderRadius: 8,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        padding: "0 3px",
+                      }}>{unread}</div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* List */}
           <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px" }}>
@@ -590,11 +616,38 @@ export default function MessagingPage({ user, onBack }) {
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
 
             {!selContact ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column",
-                alignItems: "center", justifyContent: "center",
-                color: "rgba(255,255,255,0.15)", gap: 14 }}>
-                <div style={{ fontSize: 60, filter: "opacity(0.2)" }}>💬</div>
-                <div style={{ fontSize: 14, fontWeight: 500 }}>Sélectionnez un contact</div>
+              <div style={{
+                flex: 1, display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center", gap: 16,
+                background: "radial-gradient(ellipse at 50% 60%, rgba(99,102,241,0.07) 0%, transparent 70%)",
+              }}>
+                <div style={{
+                  width: 72, height: 72, borderRadius: 22,
+                  background: "rgba(99,102,241,0.1)",
+                  border: "1px solid rgba(99,102,241,0.2)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 32,
+                }}>💬</div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: "rgba(255,255,255,0.55)", marginBottom: 6 }}>
+                    Vos messages
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.22)", lineHeight: 1.6 }}>
+                    Sélectionnez un contact à gauche<br/>pour démarrer une conversation
+                  </div>
+                </div>
+                <div style={{
+                  display: "flex", gap: 8, marginTop: 4,
+                }}>
+                  {["🔒 Privé", "⚡ Temps réel", "✓✓ Lu"].map(tag => (
+                    <span key={tag} style={{
+                      fontSize: 11, color: "rgba(255,255,255,0.2)",
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 20, padding: "4px 10px",
+                    }}>{tag}</span>
+                  ))}
+                </div>
               </div>
             ) : (
               <>
