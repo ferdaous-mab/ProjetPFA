@@ -30,6 +30,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins     = [
         FRONTEND_URL,
+        "https://10.10.0.53:5173",
+        "http://10.10.0.53:5173",
         "http://192.168.1.67:5173",
         "https://10.10.1.79:5173",
         "https://localhost:5173",
@@ -56,17 +58,11 @@ def _preload_ai_models():
     """Charge les modèles InsightFace une fois au démarrage pour éviter
     le délai de 30-60 s sur la première requête /capture."""
     from routes.enrollment import get_detector, get_encoder
-    from ai.spoofing import get_anti_spoofing
     logger.info("Chargement des modeles IA (InsightFace buffalo_l)...")
     get_detector()
     logger.info("Detecteur pret.")
     get_encoder()
     logger.info("Encodeur pret. Modeles IA charges.")
-    spoof = get_anti_spoofing()
-    if spoof._available:
-        logger.info("Anti-spoofing MiniFASNetV2 pret.")
-    else:
-        logger.warning("Anti-spoofing non disponible — passthrough actif.")
 
 
 @app.on_event("startup")

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 import cv2
 import numpy as np
 
+from typing import List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -31,16 +32,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
-SIMILARITY_THRESHOLD = 0.45   # seuil abaissé pour vidéos de classe (angle + qualité variable)
-SIMILARITY_MARGIN    = 0.05   # marge réduite
-FRAME_SAMPLE_RATE    = 30     # 1 frame analysée toutes les N frames (1/s à 30fps)
-MAX_SAMPLED_FRAMES   = 60     # limite pour éviter un timeout sur très longues vidéos
-
-# Anti-spoofing désactivé pour l'analyse vidéo :
-# MiniFASNetV2 est entraîné sur des visages frontaux en direct.
-# Une vidéo enregistrée (surface 2D) est systématiquement rejetée comme "faux".
-# On met un seuil très élevé pour ne jamais déclencher l'anti-spoofing sur vidéo.
-ANTISPOOF_MIN_PX = 99999  # désactivé — skip anti-spoofing pour toutes les frames vidéo
+SIMILARITY_THRESHOLD  = 0.42   # seuil vidéo surveillance (angle plafond + HEVC)
+SIMILARITY_MARGIN     = 0.10   # marge plus stricte pour compenser le seuil bas
+SAMPLE_INTERVAL_SEC   = 5      # analyser 1 frame toutes les N secondes de vidéo
+MAX_SAMPLED_FRAMES    = 120    # max frames analysées par vidéo (120 × 5s = 10 min couverts)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -53,34 +48,6 @@ def _bytes_to_bgr(data: bytes) -> np.ndarray:
     return img
 
 
-_spoof = None
-
-def _get_spoof():
-    global _spoof
-    if _spoof is None:
-        from ai.spoofing import get_anti_spoofing
-        _spoof = get_anti_spoofing()
-    return _spoof
-
-
-def _spoof_crop(frame: np.ndarray, bbox: list, scale: float = 2.7) -> np.ndarray:
-    """
-    Extrait un crop 2.7× élargi centré sur le visage.
-    MiniFASNetV2 a été entraîné sur des crops à ce facteur d'échelle —
-    un crop serré ne contient pas assez de contexte de texture pour détecter les faux.
-    """
-    x1, y1, x2, y2 = bbox
-    cx = (x1 + x2) // 2
-    cy = (y1 + y2) // 2
-    nw = int((x2 - x1) * scale)
-    nh = int((y2 - y1) * scale)
-    nx1 = max(0, cx - nw // 2)
-    ny1 = max(0, cy - nh // 2)
-    nx2 = min(frame.shape[1], cx + nw // 2)
-    ny2 = min(frame.shape[0], cy + nh // 2)
-    return frame[ny1:ny2, nx1:nx2]
-
-
 def _process_frame(
     frame: np.ndarray,
     db: Session,
@@ -88,42 +55,26 @@ def _process_frame(
 ) -> list[dict]:
     from ai.detector import detect_faces_classroom
 
-    spoof = _get_spoof()
     recognized = []
     faces = detect_faces_classroom(frame, min_face_size=20, min_score=0.35)
     print(f"[ATTENDANCE] {len(faces)} visage(s) détecté(s)")
 
     for i, face in enumerate(faces):
-        fw = face["width"]
-        fh = face["height"]
-
-        # Skip anti-spoofing pour les petits visages (caméra haute) :
-        # MiniFASNetV2 est entraîné sur des gros plans frontaux → faux positifs massifs
-        # sur des visages petits/flous vus de dessus. Le risque de spoofing est quasi nul
-        # avec une caméra au plafond (il faudrait brandir une affiche géante).
-        if fw >= ANTISPOOF_MIN_PX and fh >= ANTISPOOF_MIN_PX:
-            crop_spoof = _spoof_crop(frame, face["bbox"], scale=2.7)
-            is_real, spoof_conf = spoof.is_real(crop_spoof)
-            print(f"[SPOOF #{i}] is_real={is_real}  conf={spoof_conf:.4f}  bbox={face['bbox']}")
-            if not is_real:
-                print(f"[SPOOF #{i}] ❌ Visage 2D REJETÉ")
-                continue
-        else:
-            print(f"[SPOOF #{i}] visage {fw}×{fh}px — skip anti-spoof (trop petit pour MiniFASNet)")
-
         match = crud.find_student_by_embedding(
             db,
             face["normed_embedding"],
             threshold=SIMILARITY_THRESHOLD,
             margin=SIMILARITY_MARGIN,
         )
-        print(f"[MATCH #{i}] {match}")
-        if match and match["student_id"] not in seen:
-            recognized.append({
-                **match,
-                "bbox":       face["bbox"],
-                "confidence": face["confidence"],
-            })
+        if match:
+            print(f"[MATCH #{i}] RECONNU → {match['prenom']} {match['nom']}  sim={match['similarity']:.3f}")
+            if match["student_id"] not in seen:
+                recognized.append({
+                    **match,
+                    "bbox":       face["bbox"],
+                    "confidence": face["confidence"],
+                })
+        # find_student_by_embedding loggue déjà le meilleur candidat rejeté avec sim=
 
     return recognized
 
@@ -212,21 +163,73 @@ async def analyze_photo(
     }
 
 
+def _scan_video_bytes(video_bytes: bytes, filename: str, db: Session,
+                      seen: set, present_data: dict) -> tuple[int, int]:
+    """
+    Scanne une vidéo (bytes) et remplit seen + present_data partagés.
+    Utilise cap.set(CAP_PROP_POS_MSEC) pour sauter directement aux bonnes frames
+    sans lire séquentiellement toute la vidéo.
+    Retourne (total_frames, sampled_frames).
+    """
+    suffix = os.path.splitext(filename or "video.mp4")[1] or ".mp4"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(video_bytes)
+        tmp_path = f.name
+
+    total_frames = 0
+    sampled      = 0
+    try:
+        cap = cv2.VideoCapture(tmp_path)
+        if not cap.isOpened():
+            raise ValueError(f"Impossible d'ouvrir la vidéo : {filename}")
+
+        video_fps    = cap.get(cv2.CAP_PROP_FPS) or 25
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        # Nombre de frames à sauter entre chaque analyse
+        skip_n = max(1, int(video_fps * SAMPLE_INTERVAL_SEC))
+
+        while sampled < MAX_SAMPLED_FRAMES:
+            # Avancer skip_n-1 frames sans décoder (grab = rapide, pas de décompression)
+            skip_ok = True
+            for _ in range(skip_n - 1):
+                if not cap.grab():
+                    skip_ok = False
+                    break
+            if not skip_ok:
+                break
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+            sampled += 1
+
+            for r in _process_frame(frame, db, seen):
+                sid_str = r["student_id"]
+                if sid_str not in seen:
+                    seen.add(sid_str)
+                    present_data[sid_str] = r
+
+        cap.release()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    return total_frames, sampled
+
+
 @router.post("/analyze-video")
 async def analyze_video(
-    session_id: str      = Form(...),
-    video:      UploadFile = File(...),
-    db: Session          = Depends(get_db),
-    _user                = Depends(admin_or_prof),
+    session_id: str             = Form(...),
+    videos:     List[UploadFile] = File(...),
+    db: Session                 = Depends(get_db),
+    _user                       = Depends(admin_or_prof),
 ):
     """
-    Analyse une vidéo de classe (substitut temporaire du flux caméra).
-    Échantillonne 1 frame toutes les FRAME_SAMPLE_RATE frames.
-    Un étudiant est "présent" s'il est reconnu sur au moins 1 frame.
-    Les étudiants du roster jamais détectés sont marqués absents.
-
-    NOTE : la vidéo est un outil de test développeur uniquement.
-    En production, le pipeline est alimenté par un flux RTSP (source = caméra école).
+    Analyse une ou plusieurs vidéos de classe pour la même séance.
+    Toutes les vidéos sont fusionnées avant de marquer présents/absents :
+    un étudiant présent dans n'importe quelle vidéo est marqué présent.
     """
     try:
         sid = uuid.UUID(session_id)
@@ -237,68 +240,33 @@ async def analyze_video(
     if not session:
         raise HTTPException(404, f"Séance {session_id} introuvable.")
 
-    video_bytes = await video.read()
+    # Lire tous les fichiers en mémoire avant de passer au thread
+    videos_data = [(await v.read(), v.filename) for v in videos]
 
-    def _process_video() -> dict:
-        # Écrire dans un fichier temporaire (cv2 n'accepte pas les bytes)
-        suffix = os.path.splitext(video.filename or "video.mp4")[1] or ".mp4"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-            f.write(video_bytes)
-            tmp_path = f.name
+    def _process_all() -> dict:
+        seen: set[str]            = set()
+        present_data: dict[str, dict] = {}
+        total_frames  = 0
+        total_sampled = 0
 
-        try:
-            cap = cv2.VideoCapture(tmp_path)
-            if not cap.isOpened():
-                raise ValueError("Impossible d'ouvrir la vidéo.")
-
-            seen: set[str]   = set()   # student_id déjà reconnu (au moins 1 fois)
-            present_data: dict[str, dict] = {}
-            frame_idx        = 0
-            sampled          = 0
-            frames_with_face = 0
-
-            while sampled < MAX_SAMPLED_FRAMES:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                frame_idx += 1
-
-                if frame_idx % FRAME_SAMPLE_RATE != 0:
-                    continue
-
-                sampled += 1
-                recognized = _process_frame(frame, db, seen)
-
-                if recognized:
-                    frames_with_face += 1
-                for r in recognized:
-                    sid_str = r["student_id"]
-                    if sid_str not in seen:
-                        seen.add(sid_str)
-                        present_data[sid_str] = r
-
-            cap.release()
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        for video_bytes, filename in videos_data:
+            tf, ts = _scan_video_bytes(video_bytes, filename, db, seen, present_data)
+            total_frames  += tf
+            total_sampled += ts
 
         return {
-            "total_frames":   frame_idx,
-            "sampled_frames": sampled,
+            "total_frames":   total_frames,
+            "sampled_frames": total_sampled,
             "present_data":   present_data,
         }
 
-    result = await run_in_threadpool(_process_video)
+    result = await run_in_threadpool(_process_all)
 
     # Marquer présences
     presences_marquees = []
     for sid_str, r in result["present_data"].items():
-        crud.mark_attendance(
-            db, sid, uuid.UUID(sid_str), "present",
-            confidence=r["similarity"],
-        )
+        crud.mark_attendance(db, sid, uuid.UUID(sid_str), "present",
+                             confidence=r["similarity"])
         presences_marquees.append({
             "student_id": sid_str,
             "nom":        r["nom"],
@@ -306,8 +274,8 @@ async def analyze_video(
             "similarity": round(r["similarity"], 3),
         })
 
-    # Marquer absents
-    roster     = crud.get_session_roster(db, sid)
+    # Marquer absents (une seule fois, après fusion de toutes les vidéos)
+    roster      = crud.get_session_roster(db, sid)
     present_ids = set(result["present_data"].keys())
     absents_marques = []
     for s in roster:
@@ -316,17 +284,16 @@ async def analyze_video(
             absents_marques.append({"student_id": str(s.id), "nom": s.nom, "prenom": s.prenom})
 
     logger.info(
-        "analyze-video séance=%s frames=%d/%d présents=%d absents=%d",
-        session_id,
-        result["sampled_frames"],
-        result["total_frames"],
-        len(presences_marquees),
-        len(absents_marques),
+        "analyze-video séance=%s vidéos=%d frames=%d/%d présents=%d absents=%d",
+        session_id, len(videos_data),
+        result["sampled_frames"], result["total_frames"],
+        len(presences_marquees), len(absents_marques),
     )
 
     return {
         "success":          True,
         "session_id":       session_id,
+        "videos_analyzed":  len(videos_data),
         "total_frames":     result["total_frames"],
         "sampled_frames":   result["sampled_frames"],
         "students_present": len(presences_marquees),
@@ -358,6 +325,7 @@ async def analyze_stream(
         raise HTTPException(404, f"Séance {session_id} introuvable.")
 
     def _process_stream() -> dict:
+        import time as _time
         cap = cv2.VideoCapture(stream_url)
         if not cap.isOpened():
             raise ValueError(f"Impossible d'ouvrir le flux : {stream_url}")
@@ -366,6 +334,7 @@ async def analyze_stream(
         present_data: dict[str, dict] = {}
         frame_idx               = 0
         sampled                 = 0
+        last_analyzed           = 0.0
 
         try:
             while sampled < MAX_SAMPLED_FRAMES:
@@ -373,8 +342,10 @@ async def analyze_stream(
                 if not ret:
                     break
                 frame_idx += 1
-                if frame_idx % FRAME_SAMPLE_RATE != 0:
+                now = _time.time()
+                if now - last_analyzed < SAMPLE_INTERVAL_SEC:
                     continue
+                last_analyzed = now
                 sampled += 1
                 recognized = _process_frame(frame, db, seen)
                 for r in recognized:
@@ -595,3 +566,79 @@ def debug_enrollments(
     for r in result:
         print(f"  → {r['prenom']} {r['nom']}  created_at={r['created_at']}")
     return {"total": len(result), "embeddings": result}
+
+
+@router.get("/diagnostic/{session_id}")
+def diagnostic_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    _user       = Depends(admin_or_prof),
+):
+    """
+    Pour chaque étudiant du roster de la séance :
+    - is_enrolled : a-t-il un embedding en base ?
+    - nb_embeddings : combien d'angles enrôlés ?
+    - det_score_avg : qualité moyenne de ses embeddings (0-1)
+    - status : present/absent dans cette séance
+    Permet de diagnostiquer pourquoi un étudiant n'est pas reconnu.
+    """
+    from sqlalchemy import text as sqlt
+
+    try:
+        sid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(400, "session_id invalide.")
+
+    session = crud.get_session_by_id(db, sid)
+    if not session:
+        raise HTTPException(404, "Séance introuvable.")
+
+    roster = crud.get_session_roster(db, sid)
+
+    rows = db.execute(sqlt("""
+        SELECT sf.student_id::text,
+               COUNT(*)            AS nb_emb,
+               AVG(sf.det_score)   AS avg_score
+        FROM   student_faces sf
+        GROUP  BY sf.student_id
+    """)).fetchall()
+    emb_map = {r.student_id: {"nb": int(r.nb_emb), "avg": float(r.avg_score or 0)}
+               for r in rows}
+
+    att_map = {
+        str(a.student_id): a.status
+        for a in db.query(Attendance).filter(Attendance.session_id == sid).all()
+    }
+
+    result = []
+    for s in sorted(roster, key=lambda x: (x.nom, x.prenom)):
+        sid_str  = str(s.id)
+        emb_info = emb_map.get(sid_str)
+        result.append({
+            "nom":           s.nom,
+            "prenom":        s.prenom,
+            "is_enrolled":   emb_info is not None,
+            "nb_embeddings": emb_info["nb"]  if emb_info else 0,
+            "qualite_moy":   round(emb_info["avg"], 3) if emb_info else None,
+            "statut_seance": att_map.get(sid_str, "—"),
+            "probleme":      (
+                "NON ENRÔLÉ"      if not emb_info else
+                "1 SEUL ANGLE"    if emb_info["nb"] < 2 else
+                "QUALITÉ FAIBLE"  if emb_info["avg"] < 0.25 else
+                "OK"
+            ),
+        })
+
+    non_enrolles  = [r for r in result if not r["is_enrolled"]]
+    peu_dangles   = [r for r in result if r["is_enrolled"] and r["nb_embeddings"] < 2]
+    qualite_faible = [r for r in result if r["is_enrolled"] and r["qualite_moy"] and r["qualite_moy"] < 0.25]
+
+    return {
+        "session_id":        session_id,
+        "classe":            session.classe,
+        "total_roster":      len(roster),
+        "non_enrolles":      len(non_enrolles),
+        "peu_dangles":       len(peu_dangles),
+        "qualite_faible":    len(qualite_faible),
+        "etudiants":         result,
+    }

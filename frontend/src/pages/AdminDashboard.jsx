@@ -234,7 +234,9 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   const [survLoading,        setSurvLoading]        = useState(false);
   const [survSelected,       setSurvSelected]       = useState(null);
   const [survAnalyzeMode,    setSurvAnalyzeMode]    = useState("file");
-  const [survAnalyzeFile,    setSurvAnalyzeFile]    = useState(null);
+  const [survAnalyzeFile,    setSurvAnalyzeFile]    = useState([]);
+  const [survDiag,           setSurvDiag]           = useState(null);
+  const [survDiagLoading,    setSurvDiagLoading]    = useState(false);
   const [survAnalyzeUrl,     setSurvAnalyzeUrl]     = useState("");
   const [survAnalyzeLoading, setSurvAnalyzeLoading] = useState(false);
   const [survResults,        setSurvResults]        = useState({});
@@ -303,7 +305,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
   useEffect(() => { if (activeTab === "gestion" && gTab === "salles")   loadSalles();   }, [gTab]);
   useEffect(() => {
     if (activeTab === "notes") {
-      if (etudiants.length === 0) loadGestion();
+      loadGestion();
       loadNotes();
     }
     if (activeTab === "alertes") {
@@ -750,10 +752,10 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
     setSurvAnalyzeLoading(true);
     try {
       let res;
-      if (survAnalyzeMode === "file" && survAnalyzeFile) {
+      if (survAnalyzeMode === "file" && survAnalyzeFile.length > 0) {
         const fd = new FormData();
         fd.append("session_id", sessionId);
-        fd.append("video", survAnalyzeFile);
+        survAnalyzeFile.forEach(f => fd.append("videos", f));
         res = await axios.post(`${API_URL}/api/attendance/analyze-video`, fd, authHeaders());
       } else if (survAnalyzeMode === "url" && survAnalyzeUrl) {
         const fd = new FormData();
@@ -2115,6 +2117,17 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
 
         {/* Notes */}
         {activeTab === "notes" && (() => {
+          // Niveaux et groupes dérivés des étudiants réels en base
+          // Toujours afficher les 5 niveaux dans le dropdown
+          const notesNiveaux = dynNiveaux;
+          // Groupes filtrés par niveau sélectionné
+          const notesGroupes = notesPageFiltre.niveau
+            ? [...new Set(
+                etudiants
+                  .filter(e => e.annee_scolaire === notesPageFiltre.niveau)
+                  .map(e => e.classe).filter(Boolean)
+              )].sort()
+            : [...new Set(etudiants.map(e => e.classe).filter(Boolean))].sort();
           // Étudiants de la classe sélectionnée
           const notesEtudiants = etudiants.filter(e =>
             (!notesPageFiltre.niveau || e.annee_scolaire === notesPageFiltre.niveau) &&
@@ -2158,18 +2171,20 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                     borderRadius: 9, color: notesPageFiltre.niveau ? "#a5b4fc" : "rgba(255,255,255,0.4)",
                     fontFamily: "Sora, sans-serif", fontSize: 13, outline: "none", minWidth: 160 }}>
                   <option value="" style={{ background: "#0d0d1a" }}>-- Niveau --</option>
-                  {dynNiveaux.map(n => <option key={n} value={n} style={{ background: "#0d0d1a" }}>{n}</option>)}
+                  {notesNiveaux.map(n => <option key={n} value={n} style={{ background: "#0d0d1a" }}>{n}</option>)}
                 </select>
                 <select value={notesPageFiltre.classe}
                   onChange={e => { setNotesPageFiltre(f => ({ ...f, classe: e.target.value })); setNotesPageStudent(null); }}
-                  disabled={!notesPageFiltre.niveau}
+                  disabled={!notesPageFiltre.niveau || notesGroupes.length === 0}
                   style={{ padding: "9px 14px", background: notesPageFiltre.classe ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.05)",
                     border: notesPageFiltre.classe ? "1px solid rgba(99,102,241,0.4)" : "1px solid rgba(255,255,255,0.1)",
                     borderRadius: 9, color: notesPageFiltre.classe ? "#a5b4fc" : "rgba(255,255,255,0.4)",
                     fontFamily: "Sora, sans-serif", fontSize: 13, outline: "none", minWidth: 130,
-                    opacity: notesPageFiltre.niveau ? 1 : 0.5 }}>
-                  <option value="" style={{ background: "#0d0d1a" }}>-- Groupe --</option>
-                  {dynGroupes.map(g => <option key={g} value={g} style={{ background: "#0d0d1a" }}>Groupe {g}</option>)}
+                    opacity: (notesPageFiltre.niveau && notesGroupes.length > 0) ? 1 : 0.5 }}>
+                  <option value="" style={{ background: "#0d0d1a" }}>
+                    {notesPageFiltre.niveau && notesGroupes.length === 0 ? "Chargement..." : "-- Groupe --"}
+                  </option>
+                  {notesGroupes.map(g => <option key={g} value={g} style={{ background: "#0d0d1a" }}>Groupe {g}</option>)}
                 </select>
                 {(notesPageFiltre.niveau || notesPageFiltre.classe) && (
                   <button onClick={() => { setNotesPageFiltre({ niveau: "", classe: "" }); setNotesPageStudent(null); }}
@@ -3099,7 +3114,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
           );
           const sessionSelectionnee = survSessions.find(s => String(s.id) === String(survFormSessionId));
           const resVideo = survResults["video_form"];
-          const canAnalyze = survAnalyzeFile && survFormSessionId;
+          const canAnalyze = survAnalyzeFile.length > 0 && survFormSessionId;
 
           return (
           <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -3146,32 +3161,36 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
 
                 {/* Étape 1 : Upload vidéo */}
                 <Card>
-                  <SectionTitle title="Étape 1 — Importer la vidéo" icon="🎬" />
+                  <SectionTitle title="Étape 1 — Importer la/les vidéo(s)" icon="🎬" />
                   <label style={{
                     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                     gap: 10, padding: "28px 16px", borderRadius: 10,
-                    border: survAnalyzeFile ? "2px solid rgba(99,102,241,0.5)" : "2px dashed rgba(255,255,255,0.12)",
-                    background: survAnalyzeFile ? "rgba(99,102,241,0.07)" : "rgba(255,255,255,0.02)",
+                    border: survAnalyzeFile.length > 0 ? "2px solid rgba(99,102,241,0.5)" : "2px dashed rgba(255,255,255,0.12)",
+                    background: survAnalyzeFile.length > 0 ? "rgba(99,102,241,0.07)" : "rgba(255,255,255,0.02)",
                     cursor: "pointer", transition: "all 0.2s",
                   }}>
-                    <div style={{ fontSize: 32 }}>{survAnalyzeFile ? "✅" : "📹"}</div>
-                    {survAnalyzeFile ? (
+                    <div style={{ fontSize: 32 }}>{survAnalyzeFile.length > 0 ? "✅" : "📹"}</div>
+                    {survAnalyzeFile.length > 0 ? (
                       <>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: "#a5b4fc" }}>{survAnalyzeFile.name}</div>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-                          {(survAnalyzeFile.size / 1024 / 1024).toFixed(1)} Mo · Cliquer pour changer
+                        {survAnalyzeFile.map((f, i) => (
+                          <div key={i} style={{ fontWeight: 600, fontSize: 13, color: "#a5b4fc" }}>
+                            {f.name} <span style={{ fontWeight: 400, color: "rgba(255,255,255,0.35)" }}>({(f.size / 1024 / 1024).toFixed(1)} Mo)</span>
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
+                          {survAnalyzeFile.length} vidéo(s) · Cliquer pour changer
                         </div>
                       </>
                     ) : (
                       <>
                         <div style={{ fontWeight: 600, fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
-                          Cliquer pour importer une vidéo
+                          Cliquer pour importer 1 ou plusieurs vidéos
                         </div>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)" }}>MP4, AVI, MOV — max 500 Mo</div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)" }}>MP4, AVI, MOV — sélection multiple possible</div>
                       </>
                     )}
-                    <input type="file" accept="video/*" style={{ display: "none" }}
-                      onChange={e => { setSurvAnalyzeFile(e.target.files[0]); setSurvFormSessionId(""); setSurvResults({}); }} />
+                    <input type="file" accept="video/*" multiple style={{ display: "none" }}
+                      onChange={e => { setSurvAnalyzeFile(Array.from(e.target.files)); setSurvFormSessionId(""); setSurvResults({}); }} />
                   </label>
                 </Card>
 
@@ -3374,6 +3393,84 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                   )}
                 </Card>
 
+                {/* Bouton Diagnostic enrôlement */}
+                {survFormSessionId && (
+                  <button
+                    onClick={async () => {
+                      setSurvDiagLoading(true);
+                      setSurvDiag(null);
+                      try {
+                        const res = await axios.get(`${API_URL}/api/attendance/diagnostic/${survFormSessionId}`, authHeaders());
+                        setSurvDiag(res.data);
+                      } catch (e) {
+                        setSurvDiag({ error: e.response?.data?.detail || "Erreur" });
+                      } finally {
+                        setSurvDiagLoading(false);
+                      }
+                    }}
+                    disabled={survDiagLoading}
+                    style={{
+                      width: "100%", padding: "10px", borderRadius: 10, border: "1px solid rgba(251,191,36,0.3)",
+                      background: "rgba(251,191,36,0.07)", color: "#fbbf24",
+                      fontFamily: "Sora, sans-serif", fontSize: 13, fontWeight: 600,
+                      cursor: "pointer",
+                    }}>
+                    {survDiagLoading ? "Vérification..." : "🔍 Vérifier l'enrôlement de la classe"}
+                  </button>
+                )}
+
+                {/* Résultat diagnostic */}
+                {survDiag && !survDiag.error && (
+                  <Card style={{ borderColor: "rgba(251,191,36,0.2)", padding: "14px 16px" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fbbf24", marginBottom: 10 }}>
+                      Diagnostic — {survDiag.classe} ({survDiag.total_roster} étudiants)
+                    </div>
+                    <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                      {[
+                        { label: "Non enrôlés", val: survDiag.non_enrolles, color: "#ef4444" },
+                        { label: "1 seul angle", val: survDiag.peu_dangles, color: "#f97316" },
+                        { label: "Qualité faible", val: survDiag.qualite_faible, color: "#eab308" },
+                      ].map(({ label, val, color }) => val > 0 && (
+                        <div key={label} style={{ padding: "4px 10px", borderRadius: 6, background: `${color}18`, border: `1px solid ${color}40`, fontSize: 12, color }}>
+                          {val} {label}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 280, overflowY: "auto" }}>
+                      {survDiag.etudiants.filter(e => e.probleme !== "OK").map((e, i) => (
+                        <div key={i} style={{
+                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                          padding: "6px 10px", borderRadius: 7,
+                          background: e.probleme === "NON ENRÔLÉ" ? "rgba(239,68,68,0.08)" : "rgba(251,191,36,0.06)",
+                          border: `1px solid ${e.probleme === "NON ENRÔLÉ" ? "rgba(239,68,68,0.2)" : "rgba(251,191,36,0.15)"}`,
+                        }}>
+                          <div>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{e.prenom} {e.nom}</span>
+                            {e.nb_embeddings > 0 && (
+                              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginLeft: 8 }}>
+                                {e.nb_embeddings} angle(s) · qualité {e.qualite_moy}
+                              </span>
+                            )}
+                          </div>
+                          <span style={{
+                            fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 5,
+                            background: e.probleme === "NON ENRÔLÉ" ? "rgba(239,68,68,0.2)" : "rgba(251,191,36,0.15)",
+                            color: e.probleme === "NON ENRÔLÉ" ? "#fca5a5" : "#fde68a",
+                          }}>{e.probleme}</span>
+                        </div>
+                      ))}
+                      {survDiag.etudiants.filter(e => e.probleme !== "OK").length === 0 && (
+                        <div style={{ fontSize: 12, color: "#86efac", textAlign: "center", padding: 8 }}>
+                          ✅ Tous les étudiants sont bien enrôlés
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                )}
+                {survDiag?.error && (
+                  <div style={{ fontSize: 12, color: "#ef4444" }}>❌ {survDiag.error}</div>
+                )}
+
                 {/* Bouton Analyser */}
                 <button
                   onClick={async () => {
@@ -3382,7 +3479,7 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                     try {
                       const fd = new FormData();
                       fd.append("session_id", survFormSessionId);
-                      fd.append("video", survAnalyzeFile);
+                      survAnalyzeFile.forEach(f => fd.append("videos", f));
                       const res = await axios.post(`${API_URL}/api/attendance/analyze-video`, fd, authHeaders());
                       setSurvResults({ video_form: res.data });
                     } catch (e) {
@@ -4962,11 +5059,75 @@ export default function AdminDashboard({ user, onLogout, onOpenMessages }) {
                                       )}
                                     </div>
                                   </div>
-                                  <span style={{
-                                    background: sc.bg, color: sc.text,
-                                    padding: "3px 10px", borderRadius: 20,
-                                    fontSize: 11, fontWeight: 600,
-                                  }}>{sc.label}</span>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span style={{
+                                      background: sc.bg, color: sc.text,
+                                      padding: "3px 10px", borderRadius: 20,
+                                      fontSize: 11, fontWeight: 600,
+                                    }}>{sc.label}</span>
+                                    {etu.status === "absent" && (
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            await axios.put(
+                                              `${API_URL}/api/attendance/session/${sessionModal.session.id}/student/${etu.student_id}`,
+                                              { status: "present" },
+                                              authHeaders()
+                                            );
+                                            setSessionModal(prev => ({
+                                              ...prev,
+                                              etudiants: prev.etudiants.map(e =>
+                                                e.student_id === etu.student_id ? { ...e, status: "present" } : e
+                                              ),
+                                              stats: {
+                                                ...prev.stats,
+                                                presents: prev.stats.presents + 1,
+                                                absents:  prev.stats.absents  - 1,
+                                              }
+                                            }));
+                                          } catch {}
+                                        }}
+                                        style={{
+                                          padding: "3px 9px", borderRadius: 6, border: "1px solid rgba(34,197,94,0.4)",
+                                          background: "rgba(34,197,94,0.08)", color: "#86efac",
+                                          fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                          whiteSpace: "nowrap",
+                                        }}>
+                                        ✓ Présent
+                                      </button>
+                                    )}
+                                    {etu.status === "present" && (
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            await axios.put(
+                                              `${API_URL}/api/attendance/session/${sessionModal.session.id}/student/${etu.student_id}`,
+                                              { status: "absent" },
+                                              authHeaders()
+                                            );
+                                            setSessionModal(prev => ({
+                                              ...prev,
+                                              etudiants: prev.etudiants.map(e =>
+                                                e.student_id === etu.student_id ? { ...e, status: "absent" } : e
+                                              ),
+                                              stats: {
+                                                ...prev.stats,
+                                                presents: prev.stats.presents - 1,
+                                                absents:  prev.stats.absents  + 1,
+                                              }
+                                            }));
+                                          } catch {}
+                                        }}
+                                        style={{
+                                          padding: "3px 9px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.3)",
+                                          background: "rgba(239,68,68,0.06)", color: "#fca5a5",
+                                          fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                          whiteSpace: "nowrap",
+                                        }}>
+                                        ✕ Absent
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               );
                             })}

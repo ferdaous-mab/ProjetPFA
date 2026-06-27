@@ -13,7 +13,6 @@ Usage :
   python test_live.py webcam              → webcam PC
   python test_live.py video  <fichier>    → vidéo mp4
   python test_live.py image  <fichier>    → photo (→ resultat.jpg)
-  python test_live.py webcam --spoof      → active l'anti-spoofing
 
 Contrôles : q = quitter
 """
@@ -36,10 +35,7 @@ MAX_FRAME_WIDTH = 960    # compromis vitesse / détection : det_size=640 interne
 
 COLOR_KNOWN   = (34,  197,  60)   # vert  — reconnu
 COLOR_UNKNOWN = (34,   60, 230)   # rouge — inconnu / rejeté
-COLOR_SPOOF   = (0,   165, 255)   # orange — faux visage
 FONT          = cv2.FONT_HERSHEY_SIMPLEX
-
-USE_SPOOF = "--spoof" in sys.argv
 
 
 # ── Cache IoU : évite de relancer ArcFace sur les visages stables ─────────────
@@ -98,7 +94,7 @@ def _enhance(frame: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
 
 
-def analyze_frame(frame: np.ndarray, spoof) -> list[dict]:
+def analyze_frame(frame: np.ndarray) -> list[dict]:
     """
     Pipeline IDENTIQUE à attendance.py :
       - get_face_app_hd() singleton  (det_size=1280×1280 — précis pour petits visages)
@@ -166,47 +162,27 @@ def analyze_frame(frame: np.ndarray, spoof) -> list[dict]:
                 print(f"[DIAG] visage {rx2-rx1}x{ry2-ry1}px det={score:.2f} -> embedding=None")
                 continue
 
-            spoof_conf = 1.0
-            face_w = rx2 - rx1
-            face_h = ry2 - ry1
-            spoof_eligible = face_w >= 80 and face_h >= 80
-            if USE_SPOOF and spoof and spoof._available and spoof_eligible:
-                crop = frame[y1:y2, x1:x2].copy()
-                is_real, spoof_conf = spoof.is_real(crop)
-                if not is_real:
-                    r = {"bbox": bbox, "spoof": True, "recognized": False,
-                         "nom": "SPOOF", "prenom": "",
-                         "similarity": 0.0, "spoof_conf": spoof_conf,
-                         "det_score": round(score, 2)}
-                    _update_cache(bbox, r)
-                    results.append(r)
-                    continue
-
             q_emb = face.normed_embedding.astype(np.float32)
             match = crud.find_student_by_embedding(db, q_emb, threshold=0.62, margin=0.08)
 
             if match:
                 r = {
                     "bbox":       bbox,
-                    "spoof":      False,
                     "recognized": True,
                     "student_id": match["student_id"],
                     "nom":        match["nom"],
                     "prenom":     match["prenom"],
                     "similarity": round(match["similarity"], 3),
-                    "spoof_conf": spoof_conf,
                     "det_score":  round(score, 2),
                 }
             else:
                 r = {
                     "bbox":       bbox,
-                    "spoof":      False,
                     "recognized": False,
                     "student_id": None,
                     "nom":        "inconnu",
                     "prenom":     "",
                     "similarity": 0.0,
-                    "spoof_conf": spoof_conf,
                     "det_score":  round(score, 2),
                 }
             _update_cache(bbox, r)
@@ -232,10 +208,7 @@ def annotate(frame: np.ndarray, results: list[dict]) -> np.ndarray:
     for r in results:
         x1, y1, x2, y2 = r["bbox"]
 
-        if r["spoof"]:
-            color = COLOR_SPOOF
-            label = f"SPOOF {r['spoof_conf']:.2f}"
-        elif r["recognized"]:
+        if r["recognized"]:
             color = COLOR_KNOWN
             label = f"{r['prenom']} {r['nom']}  {r['similarity']:.2f}"
         else:
@@ -253,20 +226,18 @@ def annotate(frame: np.ndarray, results: list[dict]) -> np.ndarray:
     return out
 
 
-def _draw_hud(frame: np.ndarray, fps: float, spoof_on: bool, n_known: int):
+def _draw_hud(frame: np.ndarray, fps: float, n_known: int):
     h, w = frame.shape[:2]
     cv2.rectangle(frame, (0, h - 26), (w, h), (0, 0, 0), -1)
-    spoof_lbl = "anti-spoof:ON" if spoof_on else "anti-spoof:OFF"
-    spoof_col = COLOR_KNOWN if spoof_on else COLOR_SPOOF
-    cv2.putText(frame, f"FPS:{fps:.0f}  {spoof_lbl}  reconnus:{n_known}",
-                (8, h - 8), FONT, 0.42, spoof_col, 1, cv2.LINE_AA)
+    cv2.putText(frame, f"FPS:{fps:.0f}  reconnus:{n_known}",
+                (8, h - 8), FONT, 0.42, COLOR_KNOWN, 1, cv2.LINE_AA)
     cv2.putText(frame, "q=quitter", (w - 80, h - 8),
                 FONT, 0.42, (120, 120, 120), 1, cv2.LINE_AA)
 
 
 # ── Mode webcam / vidéo ───────────────────────────────────────────────────────
 
-def run_live(source, spoof, window_title: str):
+def run_live(source, window_title: str):
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print(f"[ERREUR] Impossible d'ouvrir : {source}")
@@ -286,12 +257,12 @@ def run_live(source, spoof, window_title: str):
     recognized_data: dict = {}  # student_id → result dict
 
     def _worker(f):
-        r = analyze_frame(f, spoof)
+        r = analyze_frame(f)
         with lock:
             last_results.clear()
             last_results.extend(r)
             for item in r:
-                if item["recognized"] and not item["spoof"]:
+                if item["recognized"]:
                     sid = item["student_id"]
                     if sid and sid not in recognized_data:
                         recognized_data[sid] = item
@@ -317,7 +288,7 @@ def run_live(source, spoof, window_title: str):
         frames_shown += 1
         elapsed = time.time() - t0
         fps = frames_shown / elapsed if elapsed > 0 else 0
-        _draw_hud(display, fps, USE_SPOOF and spoof._available, len(recognized_data))
+        _draw_hud(display, fps, len(recognized_data))
 
         cv2.imshow(window_title, display)
         if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -330,22 +301,20 @@ def run_live(source, spoof, window_title: str):
 
 # ── Mode image ────────────────────────────────────────────────────────────────
 
-def run_image(path: str, spoof):
+def run_image(path: str):
     frame = cv2.imread(path)
     if frame is None:
         print(f"[ERREUR] Impossible de lire : {path}")
         return
 
-    results = analyze_frame(frame, spoof)
+    results = analyze_frame(frame)
     out     = annotate(frame, results)
-    _draw_hud(out, 0, USE_SPOOF and spoof._available, 0)
+    _draw_hud(out, 0, 0)
 
     cv2.imwrite("resultat.jpg", out)
     print(f"\n[IMAGE] {len(results)} visage(s) :")
     for r in results:
-        if r["spoof"]:
-            print(f"  ⚠  SPOOF        conf_real={r['spoof_conf']:.3f}")
-        elif r["recognized"]:
+        if r["recognized"]:
             print(f"  ✓  {r['prenom']} {r['nom']}  sim={r['similarity']:.3f}")
         else:
             print(f"  ✗  inconnu")
@@ -376,38 +345,22 @@ def main():
 
     mode = args[0].lower()
 
-    spoof = None
-    if USE_SPOOF:
-        print("[INIT] Chargement anti-spoofing…")
-        from ai.spoofing import get_anti_spoofing
-        spoof = get_anti_spoofing()
-        status = "actif" if spoof._available else "passthrough (modèle absent)"
-        print(f"[INIT] Anti-spoofing : {status}")
-    else:
-        print("[INIT] Anti-spoofing désactivé (ajouter --spoof pour l'activer).")
-
-        class _PassthroughSpoof:
-            _available = False
-            def is_real(self, _): return True, 1.0
-        spoof = _PassthroughSpoof()
-
     print("[INIT] Démarrage...\n")
 
     if mode == "webcam":
-        run_live(0, spoof, "SmartCampus IA — Webcam (q=quitter)")
+        run_live(0, "SmartCampus IA — Webcam (q=quitter)")
 
     elif mode == "video":
         if len(args) < 2:
             print("Usage : python test_live.py video <fichier.mp4>")
             sys.exit(1)
-        run_live(args[1], spoof,
-                 f"SmartCampus IA — {os.path.basename(args[1])} (q=quitter)")
+        run_live(args[1], f"SmartCampus IA — {os.path.basename(args[1])} (q=quitter)")
 
     elif mode == "image":
         if len(args) < 2:
             print("Usage : python test_live.py image <photo.jpg>")
             sys.exit(1)
-        run_image(args[1], spoof)
+        run_image(args[1])
 
     else:
         print(f"Mode inconnu : '{mode}'. Utiliser : webcam | video | image")

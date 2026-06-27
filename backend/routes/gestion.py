@@ -830,33 +830,36 @@ async def get_notes(
     db: Session = Depends(get_db),
     _=Depends(admin_only)
 ):
-    """Liste toutes les notes, filtrables par classe / étudiant / matière."""
-    q = db.query(Grade)
+    """Liste toutes les notes — une seule requête JOIN (pas de N+1)."""
+    q = (
+        db.query(Grade, Student, Matiere)
+        .join(Student,  Grade.student_id  == Student.id)
+        .join(Matiere,  Grade.matiere_id  == Matiere.id)
+    )
     if student_id:
         q = q.filter(Grade.student_id == student_id)
     if matiere_id:
         q = q.filter(Grade.matiere_id == matiere_id)
+    if classe:
+        q = q.filter(Student.classe == classe)
 
-    grades = q.order_by(Grade.created_at.desc()).all()
-    result = []
-    for g in grades:
-        student = db.query(Student).filter(Student.id == g.student_id).first()
-        matiere = db.query(Matiere).filter(Matiere.id == g.matiere_id).first()
-        if classe and (not student or student.classe != classe):
-            continue
-        result.append({
+    rows = q.order_by(Grade.created_at.desc()).all()
+    return [
+        {
             "id":          str(g.id),
             "student_id":  str(g.student_id),
-            "etudiant":    f"{student.prenom} {student.nom}" if student else "?",
-            "classe":      student.classe if student else "?",
+            "etudiant":    f"{s.prenom} {s.nom}",
+            "classe":      s.classe,
+            "annee_scolaire": s.annee_scolaire,
             "matiere_id":  str(g.matiere_id),
-            "matiere":     matiere.nom if matiere else "?",
+            "matiere":     m.nom,
             "note":        g.note,
             "type":        g.type,
             "commentaire": g.commentaire,
             "date":        str(g.date),
-        })
-    return result
+        }
+        for g, s, m in rows
+    ]
 
 
 @router.post("/gestion/notes")

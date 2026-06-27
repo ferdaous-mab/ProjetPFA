@@ -547,20 +547,22 @@ def mark_attendance(
     Repose sur la contrainte UNIQUE(session_id, student_id).
     """
     now = datetime.now(timezone.utc)
+    is_present = statut == "present"
     vals: dict = {
         "id":          uuid.uuid4(),
         "student_id":  student_id,
         "session_id":  session_id,
         "status":      statut,
-        "detected_at": now,
+        "detected_at": now if is_present else None,
+        "confidence":  confidence if is_present else None,
         "created_at":  now,
     }
-    if confidence is not None:
-        vals["confidence"] = confidence
 
-    update_set = {"status": statut, "detected_at": now}
-    if confidence is not None:
-        update_set["confidence"] = confidence
+    update_set = {
+        "status":      statut,
+        "detected_at": now if is_present else None,
+        "confidence":  confidence if is_present else None,
+    }
 
     stmt = (
         pg_insert(Attendance)
