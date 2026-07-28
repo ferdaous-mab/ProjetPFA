@@ -137,14 +137,11 @@ async def student_emploi_du_temps(
     if not student or not student.classe:
         return []
 
-    # Filtre par niveau (annee_scolaire de la matière) ET groupe (classe de la matière)
+    # Filtre par classe de l'étudiant uniquement (annee_scolaire optionnelle)
     slots = (
         db.query(EmploiTemps)
         .join(Matiere, EmploiTemps.matiere_id == Matiere.id)
-        .filter(
-            Matiere.annee_scolaire == student.annee_scolaire,
-            Matiere.classe         == student.classe,
-        )
+        .filter(EmploiTemps.classe == student.classe)
         .order_by(EmploiTemps.jour, EmploiTemps.heure_debut)
         .all()
     )

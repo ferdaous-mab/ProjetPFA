@@ -508,11 +508,7 @@ export default function StudentDashboard({ user, onLogout, onOpenMessages }) {
                   fontSize: 34, flexShrink: 0, overflow: "hidden",
                   boxShadow: "0 0 0 3px rgba(99,102,241,0.3), 0 8px 24px rgba(99,102,241,0.2)",
                 }}>
-                  {profile.photo_url
-                    ? <img src={profile.photo_url} alt="photo"
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    : "🎓"
-                  }
+                  🎓
                 </div>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>

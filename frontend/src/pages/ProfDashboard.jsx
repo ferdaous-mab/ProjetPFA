@@ -65,6 +65,23 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
   const [presLoading,      setPresLoading]      = useState(false);
   const [toggleLoading,    setToggleLoading]    = useState({});
 
+  // Onglet Étudiants
+  const [etudiants,        setEtudiants]        = useState([]);
+  const [etudiantsLoading, setEtudiantsLoading] = useState(false);
+  const [selectedGroupe,   setSelectedGroupe]   = useState(null);
+
+  // Onglet Notes
+  const [notes,                setNotes]                = useState([]);
+  const [notesLoading,         setNotesLoading]         = useState(false);
+  const [selectedMatiereNotes, setSelectedMatiereNotes] = useState(null);
+  const [selectedGroupeNotes,  setSelectedGroupeNotes]  = useState(null);
+  const [noteForm,             setNoteForm]             = useState({ student_id: "", note: "", type: "controle" });
+  const [noteSaving,           setNoteSaving]           = useState(false);
+  const [noteMsg,              setNoteMsg]              = useState("");
+
+  // Alertes absences par matière
+  const [alertesAbsences, setAlertesAbsences] = useState([]);
+
 
   const PROF_SUGGESTIONS = [
     "Taux de présence ?",
@@ -87,25 +104,93 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
       setSelectedSession(null);
       setSessionDetail(null);
     }
+    if (activeTab === "etudiants") loadEtudiants();
+    if (activeTab === "notes") {
+      if (etudiants.length === 0) loadEtudiants();
+      loadNotes(selectedMatiereNotes);
+    }
   }, [activeTab]);
 
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [ov, td, ab, al] = await Promise.all([
+      const [ov, td, ab, al, alarb] = await Promise.all([
         axios.get(`${API_URL}/api/prof/overview`,             authHeaders()),
         axios.get(`${API_URL}/api/prof/session-aujourd-hui`,  authHeaders()),
         axios.get(`${API_URL}/api/prof/etudiants-absents`,    authHeaders()),
         axios.get(`${API_URL}/api/prof/alertes`,              authHeaders()),
+        axios.get(`${API_URL}/api/prof/alertes-absences`,     authHeaders()),
       ]);
       setOverview(ov.data);
       setToday(td.data);
       setAbsents(ab.data);
       setAlertes(al.data);
+      setAlertesAbsences(alarb.data);
     } catch (err) {
       console.error("Erreur chargement prof:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadEtudiants = async () => {
+    setEtudiantsLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/api/prof/etudiants`, authHeaders());
+      setEtudiants(res.data);
+    } catch (e) {
+      console.error("Erreur chargement étudiants:", e);
+    } finally {
+      setEtudiantsLoading(false);
+    }
+  };
+
+  const loadNotes = async (matiereId) => {
+    setNotesLoading(true);
+    try {
+      const url = matiereId
+        ? `${API_URL}/api/prof/notes?matiere_id=${matiereId}`
+        : `${API_URL}/api/prof/notes`;
+      const res = await axios.get(url, authHeaders());
+      setNotes(res.data);
+    } catch (e) {
+      console.error("Erreur chargement notes:", e);
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
+  const addNote = async () => {
+    if (!noteForm.student_id || !selectedMatiereNotes || noteForm.note === "") {
+      setNoteMsg("Veuillez remplir tous les champs requis");
+      return;
+    }
+    setNoteSaving(true);
+    setNoteMsg("");
+    try {
+      await axios.post(`${API_URL}/api/prof/notes`, {
+        student_id:  noteForm.student_id,
+        matiere_id:  selectedMatiereNotes,
+        note:        parseFloat(noteForm.note),
+        type:        noteForm.type,
+        commentaire: noteForm.commentaire || null,
+      }, authHeaders());
+      setNoteMsg("✅ Note ajoutée avec succès");
+      setNoteForm({ student_id: "", note: "", type: "controle", commentaire: "" });
+      loadNotes(selectedMatiereNotes);
+    } catch (e) {
+      setNoteMsg("❌ " + (e.response?.data?.detail || "Erreur"));
+    } finally {
+      setNoteSaving(false);
+    }
+  };
+
+  const deleteNote = async (noteId) => {
+    try {
+      await axios.delete(`${API_URL}/api/prof/notes/${noteId}`, authHeaders());
+      setNotes(prev => prev.filter(n => n.id !== noteId));
+    } catch (e) {
+      console.error("Erreur suppression note:", e);
     }
   };
 
@@ -254,11 +339,38 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
       id: "alertes",
       label: "Alertes",
       color: "#f97316",
-      badge: alertes.length > 0 ? alertes.length : null,
+      badge: (alertes.length + alertesAbsences.length) > 0 ? (alertes.length + alertesAbsences.length) : null,
       icon: (
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
           <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+      ),
+    },
+    {
+      id: "etudiants",
+      label: "Mes étudiants",
+      color: "#8b5cf6",
+      icon: (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      ),
+    },
+    {
+      id: "notes",
+      label: "Notes",
+      color: "#f59e0b",
+      icon: (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
         </svg>
       ),
     },
@@ -482,62 +594,97 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
           {/* Mes matières */}
           {!loading && activeTab === "overview" && (
             <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ display: "grid", gridTemplateColumns: bp.colsAuto, gap: bp.gap2 }}>
-                <Card style={{ borderTop: "2px solid #0ea5e9" }}>
-                  <div style={{ fontSize: 30, fontWeight: 700, color: "#0ea5e9" }}>{overview?.nb_matieres || 0}</div>
-                  <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 4, fontWeight: 500 }}>Matières</div>
-                </Card>
-                <Card style={{ borderTop: "2px solid #6366f1" }}>
-                  <div style={{ fontSize: 30, fontWeight: 700, color: "#a5b4fc" }}>
+
+              {/* En-tête résumé */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+                padding: "14px 18px",
+                background: "rgba(14,165,233,0.06)",
+                border: "1px solid rgba(14,165,233,0.15)",
+                borderRadius: 12,
+              }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontSize: 22, fontWeight: 700, color: "#0ea5e9" }}>{overview?.nb_matieres || 0}</span>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>matières</span>
+                </div>
+                <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.1)" }} />
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontSize: 22, fontWeight: 700, color: "#a5b4fc" }}>
                     {overview?.matieres?.reduce((s, m) => s + m.nb_sessions, 0) || 0}
-                  </div>
-                  <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 4, fontWeight: 500 }}>Séances</div>
-                </Card>
-                <Card style={{ borderTop: "2px solid #22c55e" }}>
-                  <div style={{ fontSize: 30, fontWeight: 700, color: "#22c55e" }}>
+                  </span>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>séances</span>
+                </div>
+                <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.1)" }} />
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontSize: 22, fontWeight: 700, color: "#22c55e" }}>
                     {overview?.matieres?.length > 0
                       ? Math.round(overview.matieres.reduce((s, m) => s + m.taux_presence, 0) / overview.matieres.length)
                       : 0}%
-                  </div>
-                  <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 4, fontWeight: 500 }}>Taux présence moyen</div>
-                </Card>
+                  </span>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>présence moy.</span>
+                </div>
               </div>
 
-              {overview?.matieres?.length === 0
+              {/* Liste des matières */}
+              {!overview?.matieres?.length
                 ? <Card><EmptyState message="Aucune matière assignée" /></Card>
-                : overview?.matieres?.map((m, i) => (
-                  <Card key={i}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 15 }}>{m.nom}
-                          <span style={{ marginLeft: 8, color: "rgba(255,255,255,0.3)",
-                            fontSize: 12 }}>{m.code}</span>
-                        </div>
-                        <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 4, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                          <span>Classe {m.classe}</span>
-                          {m.annee_scolaire && (
-                            <span style={{ background: "rgba(14,165,233,0.15)", color: "#0ea5e9",
-                              fontSize: 11, padding: "1px 7px", borderRadius: 4 }}>
-                              {m.annee_scolaire}
-                            </span>
+                : overview.matieres.map((m, i) => (
+                  <Card key={i} style={{ borderLeft: "3px solid #0ea5e9" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                      <div style={{ flex: 1 }}>
+                        {/* Nom de la matière */}
+                        <div style={{ fontWeight: 700, fontSize: 16, color: "#fff", marginBottom: 6 }}>
+                          {m.nom}
+                          {m.code && (
+                            <span style={{
+                              marginLeft: 10, fontSize: 11, fontWeight: 600,
+                              background: "rgba(14,165,233,0.15)", color: "#38bdf8",
+                              padding: "2px 8px", borderRadius: 4,
+                            }}>{m.code}</span>
                           )}
-                          <span>· {m.nb_sessions} séances · Coef {m.coefficient}</span>
+                        </div>
+                        {/* Infos */}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                          {m.classe ? (
+                            <span style={{
+                              background: "rgba(99,102,241,0.15)", color: "#a5b4fc",
+                              fontSize: 11, padding: "2px 9px", borderRadius: 4, fontWeight: 600,
+                            }}>Classe {m.classe}</span>
+                          ) : m.annee_scolaire ? (
+                            <span style={{
+                              background: "rgba(99,102,241,0.15)", color: "#a5b4fc",
+                              fontSize: 11, padding: "2px 9px", borderRadius: 4, fontWeight: 600,
+                            }}>{m.annee_scolaire} — Tous groupes</span>
+                          ) : null}
+                          {m.classe && m.annee_scolaire && (
+                            <span style={{
+                              background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)",
+                              fontSize: 11, padding: "2px 9px", borderRadius: 4,
+                            }}>{m.annee_scolaire}</span>
+                          )}
+                          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+                            {m.nb_sessions} séance{m.nb_sessions > 1 ? "s" : ""}
+                          </span>
+                          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+                            Coef. {m.coefficient}
+                          </span>
                         </div>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 22, fontWeight: 700,
-                          color: m.taux_presence >= 75 ? "#22c55e" : "#ef4444" }}>
-                          {m.taux_presence}%
-                        </div>
-                        <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 11 }}>présence</div>
+                      {/* Taux de présence */}
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{
+                          fontSize: 24, fontWeight: 800,
+                          color: m.taux_presence >= 75 ? "#22c55e" : "#ef4444",
+                        }}>{m.taux_presence}%</div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>présence</div>
                       </div>
                     </div>
-                    <div style={{ marginTop: 12, background: "rgba(255,255,255,0.06)",
-                      borderRadius: 4, height: 4 }}>
+                    {/* Barre de progression */}
+                    <div style={{ marginTop: 14, background: "rgba(255,255,255,0.06)", borderRadius: 4, height: 4 }}>
                       <div style={{
                         width: `${m.taux_presence}%`, height: "100%",
                         background: m.taux_presence >= 75 ? "#22c55e" : "#ef4444",
-                        borderRadius: 4, transition: "width 0.5s ease",
+                        borderRadius: 4, transition: "width 0.6s ease",
                       }} />
                     </div>
                   </Card>
@@ -760,27 +907,494 @@ export default function ProfDashboard({ user, onLogout, onOpenMessages }) {
 
           {/* Alertes */}
           {!loading && activeTab === "alertes" && (
-            <Card>
-              <SectionTitle title="Alertes" icon="🔔" />
-              {alertes.length === 0
-                ? <EmptyState message="Aucune alerte ✅" />
-                : alertes.map((a, i) => (
-                  <div key={i} style={{
-                    padding: "13px 16px", marginBottom: 8,
-                    background: `${severityColor(a.severity)}0d`,
-                    border: `1px solid ${severityColor(a.severity)}25`,
-                    borderLeft: `3px solid ${severityColor(a.severity)}`,
-                    borderRadius: 10,
-                    transition: "background 0.15s ease",
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{a.message}</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 5 }}>
-                      {new Date(a.date).toLocaleDateString("fr-FR")}
+            <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Alertes absences > 3 par matière */}
+              <Card>
+                <SectionTitle title="Absences excessives par matière (> 3)" icon="⚠️" />
+                {alertesAbsences.length === 0
+                  ? <EmptyState message="Aucun étudiant n'a dépassé 3 absences dans vos matières ✅" />
+                  : alertesAbsences.map((a, i) => (
+                    <div key={i} style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "12px 14px", marginBottom: 8,
+                      background: a.severity === "high" ? "rgba(239,68,68,0.06)" : "rgba(245,158,11,0.06)",
+                      border: `1px solid ${a.severity === "high" ? "rgba(239,68,68,0.2)" : "rgba(245,158,11,0.2)"}`,
+                      borderLeft: `3px solid ${a.severity === "high" ? "#ef4444" : "#f59e0b"}`,
+                      borderRadius: 10,
+                    }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{a.prenom} {a.nom}</div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>
+                          {a.matiere} · Classe {a.classe}
+                        </div>
+                      </div>
+                      <div style={{
+                        background: a.severity === "high" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+                        color: a.severity === "high" ? "#ef4444" : "#f59e0b",
+                        padding: "4px 12px", borderRadius: 20, fontSize: 13, fontWeight: 700,
+                      }}>
+                        {a.absences} absences
+                      </div>
                     </div>
-                  </div>
-                ))
-              }
-            </Card>
+                  ))
+                }
+              </Card>
+
+              {/* Alertes système */}
+              <Card>
+                <SectionTitle title="Alertes système" icon="🔔" />
+                {alertes.length === 0
+                  ? <EmptyState message="Aucune alerte système" />
+                  : alertes.map((a, i) => (
+                    <div key={i} style={{
+                      padding: "13px 16px", marginBottom: 8,
+                      background: `${severityColor(a.severity)}0d`,
+                      border: `1px solid ${severityColor(a.severity)}25`,
+                      borderLeft: `3px solid ${severityColor(a.severity)}`,
+                      borderRadius: 10,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{a.message}</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 5 }}>
+                        {new Date(a.date).toLocaleDateString("fr-FR")}
+                      </div>
+                    </div>
+                  ))
+                }
+              </Card>
+            </div>
+          )}
+
+          {/* Étudiants par matière → sélecteur de groupe → liste */}
+          {activeTab === "etudiants" && (
+            <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {etudiantsLoading && (
+                <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+                  <div className="sc-spinner sc-spinner-cyan" />
+                </div>
+              )}
+              {!etudiantsLoading && etudiants.length === 0 && (
+                <Card><EmptyState message="Aucune matière assignée" /></Card>
+              )}
+
+              {!etudiantsLoading && etudiants.map((mat, mi) => {
+                // Groupes disponibles pour cette matière
+                const groupesDispos = mat.groupes.map(g => g.classe);
+                // Groupe actif pour cette matière (clé: matiere_id)
+                const grpActif = selectedGroupe?.[mat.matiere_id] || null;
+                const grpData  = grpActif ? mat.groupes.find(g => g.classe === grpActif) : null;
+
+                return (
+                  <Card key={mi}>
+                    {/* En-tête matière */}
+                    <div style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      marginBottom: 14,
+                    }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: "#a78bfa" }}>
+                          {mat.matiere_nom}
+                          {mat.matiere_code && (
+                            <span style={{ marginLeft: 8, fontSize: 11, color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>
+                              {mat.matiere_code}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
+                          {mat.classe ? `Classe ${mat.classe}` : mat.annee_scolaire}
+                          {" · "}{mat.nb_etudiants} étudiant{mat.nb_etudiants > 1 ? "s" : ""}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Sélecteur de groupe */}
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{
+                        fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.3)",
+                        textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8,
+                      }}>Choisir un groupe</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {groupesDispos.map(cls => {
+                          const isActive = grpActif === cls;
+                          const cnt = mat.groupes.find(g => g.classe === cls)?.etudiants.length || 0;
+                          return (
+                            <button
+                              key={cls}
+                              onClick={() => setSelectedGroupe(prev => ({
+                                ...prev,
+                                [mat.matiere_id]: isActive ? null : cls,
+                              }))}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 7,
+                                padding: "8px 16px", borderRadius: 10, cursor: "pointer",
+                                border: isActive
+                                  ? "1px solid rgba(139,92,246,0.6)"
+                                  : "1px solid rgba(255,255,255,0.1)",
+                                background: isActive
+                                  ? "rgba(139,92,246,0.22)"
+                                  : "rgba(255,255,255,0.04)",
+                                color: isActive ? "#a78bfa" : "rgba(255,255,255,0.55)",
+                                fontFamily: "'Inter', -apple-system, sans-serif",
+                                fontSize: 13, fontWeight: isActive ? 700 : 400,
+                                transition: "all 0.15s",
+                              }}
+                            >
+                              <div style={{
+                                width: 22, height: 22, borderRadius: 6,
+                                background: isActive ? "rgba(139,92,246,0.4)" : "rgba(255,255,255,0.08)",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                fontSize: 12, fontWeight: 800,
+                                color: isActive ? "#c4b5fd" : "rgba(255,255,255,0.4)",
+                              }}>{cls}</div>
+                              Groupe {cls}
+                              <span style={{
+                                background: isActive ? "rgba(139,92,246,0.3)" : "rgba(255,255,255,0.06)",
+                                color: isActive ? "#c4b5fd" : "rgba(255,255,255,0.3)",
+                                fontSize: 10, padding: "1px 6px", borderRadius: 8, fontWeight: 600,
+                              }}>{cnt}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Liste des étudiants du groupe sélectionné */}
+                    {!grpActif ? (
+                      <div style={{
+                        textAlign: "center", padding: "24px 0",
+                        color: "rgba(255,255,255,0.2)", fontSize: 13,
+                      }}>
+                        Sélectionnez un groupe pour afficher les étudiants
+                      </div>
+                    ) : !grpData || grpData.etudiants.length === 0 ? (
+                      <EmptyState message={`Aucun étudiant dans le groupe ${grpActif}`} />
+                    ) : (
+                      <>
+                        <div style={{ height: 1, background: "rgba(255,255,255,0.06)", marginBottom: 12 }} />
+                        <div style={{
+                          display: "grid",
+                          gridTemplateColumns: "auto 80px",
+                          gap: "0 8px",
+                          fontSize: 10, fontWeight: 600,
+                          color: "rgba(255,255,255,0.25)",
+                          textTransform: "uppercase", letterSpacing: "0.06em",
+                          padding: "0 0 8px",
+                          borderBottom: "1px solid rgba(255,255,255,0.05)",
+                        }}>
+                          <span>Étudiant</span>
+                          <span style={{ textAlign: "right" }}>Absences</span>
+                        </div>
+                        {grpData.etudiants.map((s, si) => (
+                          <div key={si} style={{
+                            display: "grid", gridTemplateColumns: "auto 80px",
+                            gap: "0 8px", alignItems: "center",
+                            padding: "10px 0",
+                            borderBottom: si < grpData.etudiants.length - 1
+                              ? "1px solid rgba(255,255,255,0.04)" : "none",
+                          }}>
+                            <div>
+                              <div style={{ fontWeight: 500, fontSize: 13 }}>{s.prenom} {s.nom}</div>
+                              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 1 }}>{s.email}</div>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              {s.absences > 0 ? (
+                                <span style={{
+                                  background: s.absences > 3 ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.12)",
+                                  color: s.absences > 3 ? "#ef4444" : "#f59e0b",
+                                  padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+                                }}>{s.absences} abs.</span>
+                              ) : (
+                                <span style={{
+                                  background: "rgba(34,197,94,0.08)", color: "#22c55e",
+                                  padding: "2px 10px", borderRadius: 20, fontSize: 11,
+                                }}>✓ 0</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Notes */}
+          {activeTab === "notes" && (
+            <div className="sc-fade" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* 1. Sélecteur de matière */}
+              <Card>
+                <SectionTitle title="Matière" icon="📚" />
+                {!overview?.matieres?.length
+                  ? <EmptyState message="Aucune matière assignée" />
+                  : (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {overview.matieres.map((m, i) => {
+                        const isSel = selectedMatiereNotes === m.matiere_id;
+                        return (
+                          <button key={i} onClick={() => {
+                            setSelectedMatiereNotes(m.matiere_id);
+                            setSelectedGroupeNotes(null);
+                            setNoteForm({ student_id: "", note: "", type: "controle" });
+                            setNoteMsg("");
+                            if (etudiants.length === 0) loadEtudiants();
+                            loadNotes(m.matiere_id);
+                          }} style={{
+                            padding: "8px 18px", borderRadius: 20, cursor: "pointer",
+                            border: isSel ? "1px solid #f59e0b" : "1px solid rgba(255,255,255,0.1)",
+                            background: isSel ? "rgba(245,158,11,0.18)" : "rgba(255,255,255,0.04)",
+                            color: isSel ? "#f59e0b" : "rgba(255,255,255,0.55)",
+                            fontSize: 13, fontWeight: isSel ? 700 : 400,
+                            fontFamily: "'Inter', -apple-system, sans-serif", transition: "all 0.15s",
+                          }}>
+                            {m.nom}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )
+                }
+              </Card>
+
+              {selectedMatiereNotes && (() => {
+                const matiereData = etudiants.find(e => e.matiere_id === selectedMatiereNotes);
+                const groupes     = matiereData?.groupes || [];
+                const grpData     = selectedGroupeNotes
+                  ? groupes.find(g => g.classe === selectedGroupeNotes)
+                  : null;
+
+                // Pivot notes par étudiant
+                const byStudent = {};
+                notes.forEach(n => {
+                  if (!byStudent[n.student_id]) byStudent[n.student_id] = { controle: [], tp: [] };
+                  if (n.type === "controle") byStudent[n.student_id].controle.push(n);
+                  else if (n.type === "tp")  byStudent[n.student_id].tp.push(n);
+                });
+
+                const NoteCell = ({ items }) => (
+                  items.length === 0 ? (
+                    <span style={{ color: "rgba(255,255,255,0.18)", fontSize: 12 }}>—</span>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      {items.map((n, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{
+                            fontWeight: 700, fontSize: 13,
+                            color: n.note >= 10 ? "#22c55e" : "#ef4444",
+                          }}>{n.note}/20</span>
+                          <button onClick={() => deleteNote(n.id)} title="Supprimer" style={{
+                            background: "none", border: "none", cursor: "pointer",
+                            color: "rgba(239,68,68,0.5)", fontSize: 13, padding: "0 2px",
+                            lineHeight: 1,
+                          }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                );
+
+                return (
+                  <>
+                    {/* 2. Sélecteur de groupe */}
+                    <Card>
+                      <SectionTitle title="Groupe" icon="👥" />
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {groupes.map(g => {
+                          const isAct = selectedGroupeNotes === g.classe;
+                          return (
+                            <button key={g.classe} onClick={() => {
+                              setSelectedGroupeNotes(isAct ? null : g.classe);
+                              setNoteForm({ student_id: "", note: "", type: "controle" });
+                              setNoteMsg("");
+                            }} style={{
+                              display: "flex", alignItems: "center", gap: 7,
+                              padding: "8px 16px", borderRadius: 10, cursor: "pointer",
+                              border: isAct ? "1px solid rgba(245,158,11,0.5)" : "1px solid rgba(255,255,255,0.1)",
+                              background: isAct ? "rgba(245,158,11,0.15)" : "rgba(255,255,255,0.04)",
+                              color: isAct ? "#f59e0b" : "rgba(255,255,255,0.5)",
+                              fontFamily: "'Inter', -apple-system, sans-serif",
+                              fontSize: 13, fontWeight: isAct ? 700 : 400, transition: "all 0.15s",
+                            }}>
+                              <div style={{
+                                width: 22, height: 22, borderRadius: 6,
+                                background: isAct ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.08)",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                fontSize: 12, fontWeight: 800,
+                                color: isAct ? "#fbbf24" : "rgba(255,255,255,0.35)",
+                              }}>{g.classe}</div>
+                              Groupe {g.classe}
+                              <span style={{
+                                fontSize: 10, padding: "1px 6px", borderRadius: 8, fontWeight: 600,
+                                background: isAct ? "rgba(245,158,11,0.25)" : "rgba(255,255,255,0.06)",
+                                color: isAct ? "#fbbf24" : "rgba(255,255,255,0.3)",
+                              }}>{g.etudiants.length}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </Card>
+
+                    {/* 3. Tableau étudiants + notes + ajout en bas */}
+                    {grpData && (
+                      <Card>
+                        {notesLoading ? (
+                          <div style={{ display: "flex", justifyContent: "center", padding: 30 }}>
+                            <div className="sc-spinner sc-spinner-cyan" />
+                          </div>
+                        ) : (
+                          <div style={{ overflowX: "auto" }}>
+                            {/* En-tête tableau */}
+                            <div style={{
+                              display: "grid",
+                              gridTemplateColumns: "28px 1fr 140px 140px",
+                              gap: 8, padding: "0 4px 10px",
+                              borderBottom: "1px solid rgba(255,255,255,0.08)",
+                              fontSize: 10, fontWeight: 700,
+                              color: "rgba(255,255,255,0.3)",
+                              textTransform: "uppercase", letterSpacing: "0.07em",
+                            }}>
+                              <span>#</span>
+                              <span>Étudiant</span>
+                              <span style={{ textAlign: "center" }}>Contrôle</span>
+                              <span style={{ textAlign: "center" }}>TP</span>
+                            </div>
+
+                            {/* Lignes étudiants */}
+                            {grpData.etudiants.map((s, si) => (
+                              <div key={si} style={{
+                                display: "grid",
+                                gridTemplateColumns: "28px 1fr 140px 140px",
+                                gap: 8, padding: "11px 4px", alignItems: "center",
+                                borderBottom: "1px solid rgba(255,255,255,0.04)",
+                                background: si % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)",
+                              }}>
+                                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", fontWeight: 600 }}>
+                                  {si + 1}
+                                </span>
+                                <div>
+                                  <div style={{ fontWeight: 500, fontSize: 13 }}>{s.prenom} {s.nom}</div>
+                                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 1 }}>{s.email}</div>
+                                </div>
+                                <div style={{ textAlign: "center" }}>
+                                  <NoteCell items={byStudent[s.id]?.controle || []} />
+                                </div>
+                                <div style={{ textAlign: "center" }}>
+                                  <NoteCell items={byStudent[s.id]?.tp || []} />
+                                </div>
+                              </div>
+                            ))}
+
+                            {/* Ligne d'ajout de note */}
+                            <div style={{
+                              marginTop: 12,
+                              padding: "14px 4px 4px",
+                              borderTop: "2px dashed rgba(245,158,11,0.25)",
+                            }}>
+                              <div style={{
+                                fontSize: 10, fontWeight: 700, color: "#f59e0b",
+                                textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10,
+                              }}>+ Ajouter une note</div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
+                                {/* Étudiant */}
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "2 1 180px" }}>
+                                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Étudiant</div>
+                                  <select
+                                    value={noteForm.student_id}
+                                    onChange={e => setNoteForm({ ...noteForm, student_id: e.target.value })}
+                                    style={{
+                                      padding: "8px 10px", background: "rgba(245,158,11,0.06)",
+                                      border: "1px solid rgba(245,158,11,0.25)", borderRadius: 8,
+                                      color: "#fff", fontSize: 13, outline: "none",
+                                      fontFamily: "'Inter', -apple-system, sans-serif", colorScheme: "dark",
+                                    }}>
+                                    <option value="">— Choisir —</option>
+                                    {grpData.etudiants.map(s => (
+                                      <option key={s.id} value={s.id}>{s.prenom} {s.nom}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                {/* Note */}
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 80px" }}>
+                                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Note /20</div>
+                                  <input
+                                    type="number" min="0" max="20" step="0.25"
+                                    placeholder="14.5"
+                                    value={noteForm.note}
+                                    onChange={e => setNoteForm({ ...noteForm, note: e.target.value })}
+                                    style={{
+                                      padding: "8px 10px", background: "rgba(245,158,11,0.06)",
+                                      border: "1px solid rgba(245,158,11,0.25)", borderRadius: 8,
+                                      color: "#fff", fontSize: 13, outline: "none",
+                                      fontFamily: "'Inter', -apple-system, sans-serif", colorScheme: "dark",
+                                    }}
+                                  />
+                                </div>
+                                {/* Type Contrôle / TP */}
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Type</div>
+                                  <div style={{ display: "flex", gap: 4 }}>
+                                    {["controle", "tp"].map(t => (
+                                      <button key={t} onClick={() => setNoteForm({ ...noteForm, type: t })} style={{
+                                        padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+                                        border: noteForm.type === t ? "1px solid #f59e0b" : "1px solid rgba(255,255,255,0.1)",
+                                        background: noteForm.type === t ? "rgba(245,158,11,0.2)" : "rgba(255,255,255,0.04)",
+                                        color: noteForm.type === t ? "#f59e0b" : "rgba(255,255,255,0.4)",
+                                        fontFamily: "'Inter', -apple-system, sans-serif",
+                                        fontSize: 12, fontWeight: noteForm.type === t ? 700 : 400,
+                                        transition: "all 0.15s",
+                                      }}>
+                                        {t === "controle" ? "Contrôle" : "TP"}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                {/* Bouton Ajouter */}
+                                <button
+                                  onClick={addNote}
+                                  disabled={noteSaving}
+                                  style={{
+                                    padding: "8px 20px", border: "none", borderRadius: 8,
+                                    background: "#f59e0b", color: "#fff",
+                                    cursor: noteSaving ? "wait" : "pointer",
+                                    fontFamily: "'Inter', -apple-system, sans-serif",
+                                    fontSize: 13, fontWeight: 700,
+                                    opacity: noteSaving ? 0.6 : 1, flexShrink: 0,
+                                    alignSelf: "flex-end",
+                                  }}>
+                                  {noteSaving ? "…" : "+ Ajouter"}
+                                </button>
+                              </div>
+                              {/* Message feedback */}
+                              {noteMsg && (
+                                <div style={{
+                                  marginTop: 8, padding: "8px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500,
+                                  background: noteMsg.startsWith("✅") ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+                                  border: `1px solid ${noteMsg.startsWith("✅") ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                                  color: noteMsg.startsWith("✅") ? "#22c55e" : "#ef4444",
+                                }}>
+                                  {noteMsg}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </Card>
+                    )}
+
+                    {!grpData && (
+                      <div style={{
+                        textAlign: "center", padding: "28px 0",
+                        color: "rgba(255,255,255,0.2)", fontSize: 13,
+                      }}>
+                        Sélectionnez un groupe pour afficher les notes
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           )}
 
           {/* Profil */}

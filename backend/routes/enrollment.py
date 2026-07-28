@@ -501,6 +501,12 @@ def finalize_enrollment(req: FinalizeRequest, db: Session = Depends(get_db)):
     student_code = str(student.id).replace('-', '')[:8].upper()
 
     # ── Etape 3 : upload des 5 images de chaque angle en parallele ────────────
+    # Photo de profil : angle "face" si capture, sinon l'angle dont la
+    # meilleure frame a le score qualite le plus eleve (fallback).
+    primary_angle = "face" if "face" in frames_by_angle else max(
+        frames_by_angle, key=lambda a: frames_by_angle[a][0]["score"]
+    )
+
     # Preparer la liste complete : (angle_id, rank, crop, is_best)
     upload_tasks = []
     for angle_id, frames in frames_by_angle.items():
@@ -524,13 +530,12 @@ def finalize_enrollment(req: FinalizeRequest, db: Session = Depends(get_db)):
         for result in pool.map(_do_upload, upload_tasks):
             if result:
                 angle_id, rank, url, is_best = result
-                # is_primary = meilleure image de l'angle face (photo de profil)
                 crud.create_student_image(
                     db,
                     student_id = student_id,
                     url        = url,
                     angle      = f"{angle_id}_{rank}",
-                    is_primary = (is_best and angle_id == "face"),
+                    is_primary = (is_best and angle_id == primary_angle),
                 )
                 uploaded += 1
 
